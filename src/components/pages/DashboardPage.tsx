@@ -1,5 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
+import { apiService, UserProfile } from '../../services/api';
 import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -42,17 +44,124 @@ import { ApplicationFlow } from '../ApplicationFlow';
 
 export function DashboardPage() {
   const navigate = useNavigate();
+  const { user, logout, isAuthenticated } = useAuth();
   const [activeTab, setActiveTab] = useState('overview');
   const [showLoanApplication, setShowLoanApplication] = useState(false);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  // Mock user data
+  useEffect(() => {
+    if (!isAuthenticated) {
+      navigate('/auth');
+      return;
+    }
+
+    loadUserProfile();
+  }, [isAuthenticated, navigate]);
+
+  // Check if user needs to complete profile
+  useEffect(() => {
+    if (user && userProfile) {
+      const kycStatus = userProfile.kycStatus;
+      const needsProfileCompletion = !kycStatus || 
+        kycStatus.overall_status === 'not_started' || 
+        kycStatus.overall_status === 'in_progress' ||
+        kycStatus.completion_percentage < 100;
+
+      if (needsProfileCompletion) {
+        navigate('/profile-completion');
+        return;
+      }
+    }
+  }, [user, userProfile, navigate]);
+
+  const loadUserProfile = async () => {
+    try {
+      const response = await apiService.getUserProfile();
+      if (response.success) {
+        setUserProfile(response.data);
+      }
+    } catch (error) {
+      console.error('Failed to load user profile:', error);
+      // If backend is not available, use mock data for demo
+      if (user) {
+        const mockUserProfile = {
+          user: user,
+          addresses: [],
+          employment: null,
+          bankAccounts: [],
+          kycStatus: {
+            id: 1,
+            user_id: user.id,
+            overall_status: 'not_started' as const,
+            completion_percentage: 0,
+            pan_verified: false,
+            aadhaar_verified: false,
+            address_verified: false,
+            bank_account_verified: false,
+            employment_verified: false,
+            video_kyc_verified: false,
+            pan_score: 0,
+            aadhaar_score: 0,
+            address_score: 0,
+            bank_score: 0,
+            employment_score: 0,
+            video_kyc_score: 0,
+            overall_score: 0,
+            risk_level: 'medium' as const,
+            risk_score: 50,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          }
+        };
+        setUserProfile(mockUserProfile);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigate('/');
+    } catch (error) {
+      console.error('Logout failed:', error);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading your dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user || !userProfile) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-red-600">Failed to load user data</p>
+          <Button onClick={() => navigate('/auth')} className="mt-4">
+            Go to Login
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // User data from API
   const userData = {
-    name: 'Rajesh Kumar',
-    phone: '+91 98765 43210',
-    email: 'rajesh.kumar@email.com',
-    kycStatus: 'verified',
-    creditScore: 750,
-    availableCredit: 500000,
+    name: `${user.first_name} ${user.last_name}`,
+    phone: user.phone,
+    email: user.email,
+    kycStatus: userProfile.kycStatus?.overall_status || 'not_started',
+    creditScore: userProfile.kycStatus?.overall_score || 0,
+    availableCredit: userProfile.user.max_loan_amount || 500000,
     totalLoans: 2,
     activeLoans: 1
   };

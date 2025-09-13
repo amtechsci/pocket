@@ -18,7 +18,7 @@ const transactionRoutes = require('./routes/transactions');
 const notificationRoutes = require('./routes/notifications');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 
 // Security middleware
 app.use(helmet({

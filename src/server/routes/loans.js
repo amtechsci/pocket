@@ -1,590 +1,663 @@
 const express = require('express');
-const { Loan, User, Transaction, Document, getNextSequence } = require('../utils/database');
-const { authenticateToken } = require('../middleware/auth');
-const { validate, schemas } = require('../middleware/validation');
+const { getConnection } = require('../utils/mysqlDatabase');
 const router = express.Router();
 
-// Apply for a loan
-router.post('/apply', authenticateToken, validate(schemas.loanApplication), async (req, res) => {
-  try {
-    const { amount, tenure, purpose, type, monthlyIncome, employmentType, companyName } = req.validatedData;
+// =====================================================
+// AUTHENTICATION MIDDLEWARE
+// =====================================================
 
-    // Get user details
-    const user = User.findById(req.user.id);
-    if (!user) {
+const authenticateToken = async (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ 
+      success: false, 
+      message: 'Access token required' 
+    });
+  }
+
+  try {
+    const jwt = require('jsonwebtoken');
+    const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+    const decoded = jwt.verify(token, JWT_SECRET);
+    
+    const connection = await getConnection();
+    const [users] = await connection.execute(
+      'SELECT id, email, status FROM users WHERE id = ? AND status = "active"',
+      [decoded.userId]
+    );
+    
+    if (users.length === 0) {
+      return res.status(401).json({ 
+        success: false, 
+        message: 'Invalid or expired token' 
+      });
+    }
+
+    req.user = users[0];
+    next();
+  } catch (error) {
+    return res.status(403).json({ 
+      success: false, 
+      message: 'Invalid token' 
+    });
+  }
+};
+
+// =====================================================
+// LOAN APPLICATION MANAGEMENT
+// =====================================================
+
+// POST /api/loans/apply - Create New Loan Application
+router.post('/apply', authenticateToken, async (req, res) => {
+  try {
+    const { 
+      loan_amount, 
+      loan_purpose, 
+      loan_tenure_days = 30,
+      requested_disbursal_date 
+    } = req.body;
+
+    if (!loan_amount || !loan_purpose) {
+      return res.status(400).json({
+        success: false,
+        message: 'Loan amount and purpose are required'
+      });
+    }
+
+    const connection = await getConnection();
+
+    // Get user with member tier info
+    const [users] = await connection.execute(
+      `SELECT u.*, mt.max_loan_amount, mt.min_loan_amount, mt.max_loan_tenure_days,
+              mt.processing_fee_rate, mt.interest_rate_per_day
+       FROM users u 
+       LEFT JOIN member_tiers mt ON u.member_id = mt.id 
+       WHERE u.id = ?`,
+      [req.user.id]
+    );
+
+    if (users.length === 0) {
       return res.status(404).json({
-        status: 'error',
+        success: false,
         message: 'User not found'
       });
     }
 
-    // Check if user has completed KYC
-    if (user.kycStatus !== 'completed') {
+    const user = users[0];
+
+    // Validate loan amount against member tier limits
+    if (loan_amount < user.min_loan_amount || loan_amount > user.max_loan_amount) {
       return res.status(400).json({
-        status: 'error',
-        message: 'Please complete KYC verification before applying for a loan'
+        success: false,
+        message: `Loan amount must be between ₹${user.min_loan_amount} and ₹${user.max_loan_amount} for your member tier`
       });
     }
 
-    // Check for existing pending applications
-    const pendingLoans = Loan.findAll({
-      userId: req.user.id,
-      status: { $in: ['pending', 'under_review'] }
-    });
-
-    if (pendingLoans.length > 0) {
+    // Validate tenure
+    if (loan_tenure_days > user.max_loan_tenure_days) {
       return res.status(400).json({
-        status: 'error',
-        message: 'You already have a pending loan application'
+        success: false,
+        message: `Loan tenure cannot exceed ${user.max_loan_tenure_days} days for your member tier`
       });
     }
 
-    // Calculate interest rate based on credit score and loan type
-    const creditScore = user.creditScore || 650;
-    let interestRate;
-    
-    if (type === 'personal') {
-      interestRate = creditScore >= 750 ? 12 : creditScore >= 700 ? 14 : 16;
-    } else { // business
-      interestRate = creditScore >= 750 ? 14 : creditScore >= 700 ? 16 : 18;
-    }
-
-    // Calculate EMI
-    const monthlyRate = interestRate / (12 * 100);
-    const emi = Math.round((amount * monthlyRate * Math.pow(1 + monthlyRate, tenure)) / 
-                          (Math.pow(1 + monthlyRate, tenure) - 1));
-
-    // Calculate fees
-    const processingFee = Math.min(amount * 0.02, 10000); // 2% or max 10k
-    const insurance = amount * 0.005; // 0.5% of loan amount
-
-    // Generate loan ID
-    const loanIdNumber = getNextSequence('loanId');
-    const loanId = `CL${loanIdNumber}`;
+    // Calculate loan details
+    const processing_fee = (loan_amount * user.processing_fee_rate) / 100;
+    const gst_on_processing_fee = (processing_fee * 18) / 100;
+    const total_processing_fee = processing_fee + gst_on_processing_fee;
+    const interest_amount = (loan_amount * user.interest_rate_per_day * loan_tenure_days) / 100;
+    const total_amount = loan_amount + total_processing_fee + interest_amount;
 
     // Create loan application
-    const loan = Loan.create({
-      loanId,
-      userId: req.user.id,
-      type,
-      amount,
-      tenure,
-      purpose,
-      interestRate,
-      emi,
-      status: 'pending',
-      applicationData: {
-        monthlyIncome,
-        employmentType,
-        companyName,
-        existingLoans: 0, // TODO: Calculate from existing loans
-        cibilScore: creditScore
-      },
-      processingFee,
-      insurance,
-      totalAmount: amount + processingFee + insurance,
-      appliedDate: new Date().toISOString()
-    });
+    const [result] = await connection.execute(
+      `INSERT INTO loan_applications (user_id, loan_amount, loan_purpose, loan_tenure_days,
+                                     requested_disbursal_date, processing_fee_rate, interest_rate_per_day,
+                                     processing_fee, gst_on_processing_fee, total_processing_fee,
+                                     interest_amount, total_amount, status, application_date) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NOW())`,
+      [req.user.id, loan_amount, loan_purpose, loan_tenure_days, requested_disbursal_date,
+       user.processing_fee_rate, user.interest_rate_per_day, processing_fee, gst_on_processing_fee,
+       total_processing_fee, interest_amount, total_amount]
+    );
 
-    // Create processing fee transaction
-    Transaction.create({
-      userId: req.user.id,
-      loanId: loan.loanId,
-      type: 'debit',
-      amount: -processingFee,
-      description: 'Loan Processing Fee',
-      status: 'pending',
-      reference: `PROC_FEE_${loan.loanId}`,
-      method: 'pending'
-    });
+    const applicationId = result.insertId;
+
+    // Create loan record
+    const [loanResult] = await connection.execute(
+      `INSERT INTO loans (user_id, loan_application_id, loan_amount, loan_purpose, 
+                         loan_tenure_days, interest_rate_per_day, processing_fee_rate,
+                         processing_fee, total_amount, status, disbursal_date, due_date) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, DATE_ADD(?, INTERVAL ? DAY))`,
+      [req.user.id, applicationId, loan_amount, loan_purpose, loan_tenure_days,
+       user.interest_rate_per_day, user.processing_fee_rate, total_processing_fee,
+       total_amount, requested_disbursal_date, requested_disbursal_date, loan_tenure_days]
+    );
+
+    const loanId = loanResult.insertId;
+
+    // Update loan application with loan ID
+    await connection.execute(
+      'UPDATE loan_applications SET loan_id = ? WHERE id = ?',
+      [loanId, applicationId]
+    );
+
+    // Create notification
+    await connection.execute(
+      `INSERT INTO notifications (user_id, type, title, message, is_read) 
+       VALUES (?, 'loan_application', 'Loan Application Submitted', 
+               'Your loan application for ₹${loan_amount} has been submitted successfully.', FALSE)`,
+      [req.user.id]
+    );
 
     res.status(201).json({
-      status: 'success',
+      success: true,
       message: 'Loan application submitted successfully',
       data: {
-        loan: {
-          id: loan.id,
-          loanId: loan.loanId,
-          type: loan.type,
-          amount: loan.amount,
-          tenure: loan.tenure,
-          interestRate: loan.interestRate,
-          emi: loan.emi,
-          status: loan.status,
-          processingFee: loan.processingFee,
-          totalAmount: loan.totalAmount
-        }
+        application_id: applicationId,
+        loan_id: loanId,
+        loan_amount,
+        loan_purpose,
+        loan_tenure_days,
+        processing_fee,
+        gst_on_processing_fee,
+        total_processing_fee,
+        interest_amount,
+        total_amount,
+        status: 'pending',
+        next_steps: [
+          'Complete KYC verification',
+          'Upload required documents',
+          'Complete video KYC',
+          'Wait for approval'
+        ]
       }
     });
 
   } catch (error) {
     console.error('Loan application error:', error);
     res.status(500).json({
-      status: 'error',
-      message: 'Failed to submit loan application'
+      success: false,
+      message: 'Internal server error while submitting loan application'
     });
   }
 });
 
-// Get loan eligibility
-router.post('/eligibility', authenticateToken, async (req, res) => {
+// GET /api/loans/applications - Get User's Loan Applications
+router.get('/applications', authenticateToken, async (req, res) => {
   try {
-    const { amount, monthlyIncome, existingEmis = 0, employmentType, creditScore } = req.body;
+    const { status, limit = 10, offset = 0 } = req.query;
 
-    if (!amount || !monthlyIncome || !employmentType) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Amount, monthly income, and employment type are required'
+    const connection = await getConnection();
+
+    let query = `
+      SELECT la.*, l.loan_id, l.status as loan_status, l.disbursal_date, l.due_date
+      FROM loan_applications la
+      LEFT JOIN loans l ON la.loan_id = l.id
+      WHERE la.user_id = ?
+    `;
+    let params = [req.user.id];
+
+    if (status) {
+      query += ' AND la.status = ?';
+      params.push(status);
+    }
+
+    query += ' ORDER BY la.application_date DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), parseInt(offset));
+
+    const [applications] = await connection.execute(query, params);
+
+    res.json({
+      success: true,
+      data: applications
+    });
+
+  } catch (error) {
+    console.error('Get loan applications error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error while fetching loan applications'
+    });
+  }
+});
+
+// GET /api/loans/applications/:id - Get Specific Loan Application
+router.get('/applications/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const connection = await getConnection();
+
+    const [applications] = await connection.execute(
+      `SELECT la.*, l.loan_id, l.status as loan_status, l.disbursal_date, l.due_date,
+              u.first_name, u.last_name, u.email, u.phone
+       FROM loan_applications la
+       LEFT JOIN loans l ON la.loan_id = l.id
+       LEFT JOIN users u ON la.user_id = u.id
+       WHERE la.id = ? AND la.user_id = ?`,
+      [id, req.user.id]
+    );
+
+    if (applications.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Loan application not found'
       });
     }
 
-    // Calculate eligibility
-    const foir = 0.6; // Fixed Obligation to Income Ratio
-    const availableIncome = monthlyIncome - existingEmis;
-    const maxEmi = availableIncome * foir;
+    // Get application documents
+    const [documents] = await connection.execute(
+      'SELECT * FROM user_documents WHERE user_id = ? ORDER BY created_at DESC',
+      [req.user.id]
+    );
 
-    // Calculate maximum eligible amount for different tenures
-    const eligibilityResults = [12, 24, 36, 48, 60].map(tenure => {
-      const interestRate = creditScore >= 750 ? 12 : creditScore >= 700 ? 14 : 16;
-      const monthlyRate = interestRate / (12 * 100);
-      
-      const maxAmount = Math.floor((maxEmi * (Math.pow(1 + monthlyRate, tenure) - 1)) / 
-                                  (monthlyRate * Math.pow(1 + monthlyRate, tenure)));
-
-      const requestedEmi = Math.round((amount * monthlyRate * Math.pow(1 + monthlyRate, tenure)) / 
-                                    (Math.pow(1 + monthlyRate, tenure) - 1));
-
-      return {
-        tenure,
-        maxAmount,
-        interestRate,
-        isEligible: maxAmount >= amount,
-        emi: requestedEmi,
-        totalInterest: (requestedEmi * tenure) - amount,
-        totalAmount: requestedEmi * tenure
-      };
-    });
-
-    const overallEligible = eligibilityResults.some(result => result.isEligible);
-    const recommendedTenure = eligibilityResults.find(result => result.isEligible);
+    // Get KYC status
+    const [kycStatus] = await connection.execute(
+      'SELECT * FROM user_kyc_status WHERE user_id = ?',
+      [req.user.id]
+    );
 
     res.json({
-      status: 'success',
+      success: true,
       data: {
-        isEligible: overallEligible,
-        requestedAmount: amount,
-        monthlyIncome,
-        availableIncome,
-        maxEmi,
-        eligibilityByTenure: eligibilityResults,
-        recommendation: recommendedTenure ? {
-          tenure: recommendedTenure.tenure,
-          emi: recommendedTenure.emi,
-          interestRate: recommendedTenure.interestRate,
-          message: `You are eligible for ₹${amount.toLocaleString()} for ${recommendedTenure.tenure} months`
-        } : {
-          message: 'You may not be eligible for the requested amount. Consider a lower amount or longer tenure.'
+        application: applications[0],
+        documents,
+        kyc_status: kycStatus[0] || null
+      }
+    });
+
+  } catch (error) {
+    console.error('Get loan application error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error while fetching loan application'
+    });
+  }
+});
+
+// =====================================================
+// LOAN MANAGEMENT
+// =====================================================
+
+// GET /api/loans - Get User's Active Loans
+router.get('/', authenticateToken, async (req, res) => {
+  try {
+    const { status, limit = 10, offset = 0 } = req.query;
+
+    const connection = await getConnection();
+
+    let query = `
+      SELECT l.*, la.loan_purpose, la.application_date
+      FROM loans l
+      LEFT JOIN loan_applications la ON l.loan_application_id = la.id
+      WHERE l.user_id = ?
+    `;
+    let params = [req.user.id];
+
+    if (status) {
+      query += ' AND l.status = ?';
+      params.push(status);
+    }
+
+    query += ' ORDER BY l.created_at DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), parseInt(offset));
+
+    const [loans] = await connection.execute(query, params);
+
+    res.json({
+      success: true,
+      data: loans
+    });
+
+  } catch (error) {
+    console.error('Get loans error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error while fetching loans'
+    });
+  }
+});
+
+// GET /api/loans/:id - Get Specific Loan Details
+router.get('/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const connection = await getConnection();
+
+    const [loans] = await connection.execute(
+      `SELECT l.*, la.loan_purpose, la.application_date, la.processing_fee_rate,
+              u.first_name, u.last_name, u.email, u.phone
+       FROM loans l
+       LEFT JOIN loan_applications la ON l.loan_application_id = la.id
+       LEFT JOIN users u ON l.user_id = u.id
+       WHERE l.id = ? AND l.user_id = ?`,
+      [id, req.user.id]
+    );
+
+    if (loans.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Loan not found'
+      });
+    }
+
+    const loan = loans[0];
+
+    // Get loan transactions
+    const [transactions] = await connection.execute(
+      'SELECT * FROM transactions WHERE loan_id = ? ORDER BY created_at DESC',
+      [id]
+    );
+
+    // Calculate loan summary
+    const paid_amount = transactions
+      .filter(t => t.type === 'repayment' && t.status === 'completed')
+      .reduce((sum, t) => sum + parseFloat(t.amount), 0);
+
+    const remaining_amount = parseFloat(loan.total_amount) - paid_amount;
+    const days_remaining = Math.max(0, Math.ceil((new Date(loan.due_date) - new Date()) / (1000 * 60 * 60 * 24)));
+
+    res.json({
+      success: true,
+      data: {
+        loan,
+        transactions,
+        summary: {
+          total_amount: parseFloat(loan.total_amount),
+          paid_amount,
+          remaining_amount,
+          days_remaining,
+          is_overdue: days_remaining < 0
         }
       }
     });
 
   } catch (error) {
-    console.error('Eligibility check error:', error);
+    console.error('Get loan error:', error);
     res.status(500).json({
-      status: 'error',
-      message: 'Failed to check eligibility'
+      success: false,
+      message: 'Internal server error while fetching loan details'
     });
   }
 });
 
-// Get loan offers
-router.get('/offers', authenticateToken, async (req, res) => {
+// POST /api/loans/:id/pay - Make Loan Payment
+router.post('/:id/pay', authenticateToken, async (req, res) => {
   try {
-    const user = User.findById(req.user.id);
-    if (!user) {
+    const { id } = req.params;
+    const { amount, payment_method = 'upi', payment_reference } = req.body;
+
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid payment amount is required'
+      });
+    }
+
+    const connection = await getConnection();
+
+    // Get loan details
+    const [loans] = await connection.execute(
+      'SELECT * FROM loans WHERE id = ? AND user_id = ?',
+      [id, req.user.id]
+    );
+
+    if (loans.length === 0) {
       return res.status(404).json({
-        status: 'error',
+        success: false,
+        message: 'Loan not found'
+      });
+    }
+
+    const loan = loans[0];
+
+    if (loan.status !== 'active') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot make payment for inactive loan'
+      });
+    }
+
+    // Generate transaction reference
+    const transaction_reference = `TXN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Create transaction record
+    const [result] = await connection.execute(
+      `INSERT INTO transactions (loan_id, user_id, type, amount, payment_method, 
+                                payment_reference, transaction_reference, status) 
+       VALUES (?, ?, 'repayment', ?, ?, ?, ?, 'pending')`,
+      [id, req.user.id, amount, payment_method, payment_reference, transaction_reference]
+    );
+
+    const transactionId = result.insertId;
+
+    // TODO: Integrate with actual payment gateway
+    // For now, simulate payment processing
+    setTimeout(async () => {
+      try {
+        await connection.execute(
+          'UPDATE transactions SET status = "completed", processed_at = NOW() WHERE id = ?',
+          [transactionId]
+        );
+
+        // Check if loan is fully paid
+        const [transactions] = await connection.execute(
+          'SELECT SUM(amount) as total_paid FROM transactions WHERE loan_id = ? AND type = "repayment" AND status = "completed"',
+          [id]
+        );
+
+        const totalPaid = parseFloat(transactions[0].total_paid || 0);
+        const loanAmount = parseFloat(loan.total_amount);
+
+        if (totalPaid >= loanAmount) {
+          await connection.execute(
+            'UPDATE loans SET status = "completed", completed_at = NOW() WHERE id = ?',
+            [id]
+          );
+
+          // Create completion notification
+          await connection.execute(
+            `INSERT INTO notifications (user_id, type, title, message, is_read) 
+             VALUES (?, 'loan_completed', 'Loan Completed', 
+                     'Congratulations! Your loan has been fully repaid.', FALSE)`,
+            [req.user.id]
+          );
+        }
+
+        // Create payment notification
+        await connection.execute(
+          `INSERT INTO notifications (user_id, type, title, message, is_read) 
+           VALUES (?, 'payment_success', 'Payment Successful', 
+                   'Your payment of ₹${amount} has been processed successfully.', FALSE)`,
+          [req.user.id]
+        );
+      } catch (error) {
+        console.error('Payment processing error:', error);
+      }
+    }, 3000); // Simulate 3-second payment processing
+
+    res.json({
+      success: true,
+      message: 'Payment initiated successfully',
+      data: {
+        transaction_id: transactionId,
+        transaction_reference,
+        amount,
+        payment_method,
+        status: 'pending',
+        estimated_completion_time: '3 minutes'
+      }
+    });
+
+  } catch (error) {
+    console.error('Loan payment error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error while processing payment'
+    });
+  }
+});
+
+// =====================================================
+// ELIGIBILITY CHECK
+// =====================================================
+
+// POST /api/loans/check-eligibility - Check Loan Eligibility
+router.post('/check-eligibility', authenticateToken, async (req, res) => {
+  try {
+    const { loan_amount, loan_tenure_days = 30 } = req.body;
+
+    if (!loan_amount) {
+      return res.status(400).json({
+        success: false,
+        message: 'Loan amount is required'
+      });
+    }
+
+    const connection = await getConnection();
+
+    // Get user with complete profile
+    const [users] = await connection.execute(
+      `SELECT u.*, mt.max_loan_amount, mt.min_loan_amount, mt.max_loan_tenure_days,
+              mt.processing_fee_rate, mt.interest_rate_per_day, mt.auto_approval_enabled
+       FROM users u 
+       LEFT JOIN member_tiers mt ON u.member_id = mt.id 
+       WHERE u.id = ?`,
+      [req.user.id]
+    );
+
+    if (users.length === 0) {
+      return res.status(404).json({
+        success: false,
         message: 'User not found'
       });
     }
 
-    const creditScore = user.creditScore || 650;
-    const monthlyIncome = user.personalInfo?.monthlyIncome || 50000;
+    const user = users[0];
 
-    // Generate personalized offers based on user profile
-    const offers = [
-      {
-        id: 'offer_1',
-        type: 'personal',
-        title: 'Personal Loan - Quick Cash',
-        amount: Math.min(monthlyIncome * 15, 500000),
-        tenure: 36,
-        interestRate: creditScore >= 750 ? 12 : creditScore >= 700 ? 14 : 16,
-        processingFee: 1999,
-        features: [
-          'Instant approval',
-          'No collateral required',
-          'Flexible repayment',
-          'Quick disbursal'
-        ],
-        eligibility: [
-          'Minimum salary: ₹25,000',
-          'Age: 21-65 years',
-          'Employment: Salaried/Self-employed'
-        ]
-      },
-      {
-        id: 'offer_2',
-        type: 'personal',
-        title: 'Premium Personal Loan',
-        amount: Math.min(monthlyIncome * 20, 1000000),
-        tenure: 48,
-        interestRate: creditScore >= 750 ? 11.5 : creditScore >= 700 ? 13.5 : 15.5,
-        processingFee: 2999,
-        features: [
-          'Higher loan amount',
-          'Competitive rates',
-          'Longer tenure options',
-          'Priority service'
-        ],
-        eligibility: [
-          'Minimum salary: ₹50,000',
-          'CIBIL Score: 700+',
-          'Stable employment'
-        ]
-      }
-    ];
+    // Get KYC status
+    const [kycStatus] = await connection.execute(
+      'SELECT * FROM user_kyc_status WHERE user_id = ?',
+      [req.user.id]
+    );
 
-    // Add business loan offer if applicable
-    if (user.personalInfo?.employmentType === 'self-employed') {
-      offers.push({
-        id: 'offer_3',
-        type: 'business',
-        title: 'Business Growth Loan',
-        amount: Math.min(monthlyIncome * 25, 2000000),
-        tenure: 60,
-        interestRate: creditScore >= 750 ? 14 : creditScore >= 700 ? 16 : 18,
-        processingFee: 5000,
-        features: [
-          'Business expansion',
-          'Working capital',
-          'Equipment financing',
-          'Tax benefits'
-        ],
-        eligibility: [
-          'Business vintage: 2+ years',
-          'Annual turnover: ₹10 lakh+',
-          'ITR filed for 2 years'
-        ]
-      });
+    // Get employment details
+    const [employment] = await connection.execute(
+      'SELECT * FROM user_employment WHERE user_id = ?',
+      [req.user.id]
+    );
+
+    // Get bank accounts
+    const [bankAccounts] = await connection.execute(
+      'SELECT * FROM user_bank_accounts WHERE user_id = ? AND status = "active"',
+      [req.user.id]
+    );
+
+    // Eligibility checks
+    const eligibility = {
+      is_eligible: true,
+      reasons: [],
+      warnings: [],
+      recommendations: []
+    };
+
+    // Check loan amount limits
+    if (loan_amount < user.min_loan_amount) {
+      eligibility.is_eligible = false;
+      eligibility.reasons.push(`Loan amount must be at least ₹${user.min_loan_amount}`);
     }
 
-    // Calculate EMI for each offer
-    offers.forEach(offer => {
-      const monthlyRate = offer.interestRate / (12 * 100);
-      offer.emi = Math.round((offer.amount * monthlyRate * Math.pow(1 + monthlyRate, offer.tenure)) / 
-                           (Math.pow(1 + monthlyRate, offer.tenure) - 1));
-      offer.totalInterest = (offer.emi * offer.tenure) - offer.amount;
-      offer.totalAmount = offer.emi * offer.tenure + offer.processingFee;
-    });
+    if (loan_amount > user.max_loan_amount) {
+      eligibility.is_eligible = false;
+      eligibility.reasons.push(`Loan amount cannot exceed ₹${user.max_loan_amount} for your member tier`);
+    }
+
+    // Check tenure limits
+    if (loan_tenure_days > user.max_loan_tenure_days) {
+      eligibility.is_eligible = false;
+      eligibility.reasons.push(`Loan tenure cannot exceed ${user.max_loan_tenure_days} days`);
+    }
+
+    // Check KYC completion
+    if (!user.email_verified) {
+      eligibility.warnings.push('Email verification pending');
+    }
+
+    if (!user.phone_verified) {
+      eligibility.warnings.push('Phone verification pending');
+    }
+
+    if (kycStatus.length > 0) {
+      const kyc = kycStatus[0];
+      if (!kyc.pan_verified) {
+        eligibility.reasons.push('PAN verification required');
+      }
+      if (!kyc.aadhaar_verified) {
+        eligibility.reasons.push('Aadhaar verification required');
+      }
+      if (!kyc.bank_account_verified) {
+        eligibility.reasons.push('Bank account verification required');
+      }
+    }
+
+    // Check employment
+    if (employment.length === 0) {
+      eligibility.reasons.push('Employment details required');
+    } else if (!employment[0].employment_verified) {
+      eligibility.warnings.push('Employment verification pending');
+    }
+
+    // Check bank accounts
+    if (bankAccounts.length === 0) {
+      eligibility.reasons.push('Bank account required');
+    } else {
+      const hasVerifiedAccount = bankAccounts.some(account => account.is_verified);
+      if (!hasVerifiedAccount) {
+        eligibility.warnings.push('Bank account verification required');
+      }
+    }
+
+    // Calculate loan details if eligible
+    let loanDetails = null;
+    if (eligibility.is_eligible) {
+      const processing_fee = (loan_amount * user.processing_fee_rate) / 100;
+      const gst_on_processing_fee = (processing_fee * 18) / 100;
+      const total_processing_fee = processing_fee + gst_on_processing_fee;
+      const interest_amount = (loan_amount * user.interest_rate_per_day * loan_tenure_days) / 100;
+      const total_amount = loan_amount + total_processing_fee + interest_amount;
+
+      loanDetails = {
+        loan_amount,
+        loan_tenure_days,
+        processing_fee_rate: user.processing_fee_rate,
+        interest_rate_per_day: user.interest_rate_per_day,
+        processing_fee,
+        gst_on_processing_fee,
+        total_processing_fee,
+        interest_amount,
+        total_amount,
+        auto_approval_eligible: user.auto_approval_enabled
+      };
+    }
 
     res.json({
-      status: 'success',
+      success: true,
       data: {
-        offers,
-        userProfile: {
-          creditScore,
-          memberLevel: user.memberLevel,
-          eligibleForPreApproval: creditScore >= 700
+        eligibility,
+        loan_details: loanDetails,
+        user_tier: {
+          name: user.tier_name,
+          display_name: user.tier_display_name
         }
       }
     });
 
   } catch (error) {
-    console.error('Get offers error:', error);
+    console.error('Check eligibility error:', error);
     res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch loan offers'
-    });
-  }
-});
-
-// Get loan status
-router.get('/:loanId/status', authenticateToken, async (req, res) => {
-  try {
-    const loan = Loan.findOne({
-      loanId: req.params.loanId,
-      userId: req.user.id
-    });
-
-    if (!loan) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Loan not found'
-      });
-    }
-
-    // Get loan timeline/status history
-    const statusHistory = [
-      {
-        status: 'pending',
-        date: loan.createdAt,
-        description: 'Application submitted',
-        completed: true
-      },
-      {
-        status: 'under_review',
-        date: loan.status === 'under_review' ? loan.updatedAt : null,
-        description: 'Under review by our team',
-        completed: ['under_review', 'approved', 'disbursed', 'active'].includes(loan.status)
-      },
-      {
-        status: 'approved',
-        date: loan.approvedDate || null,
-        description: 'Loan approved',
-        completed: ['approved', 'disbursed', 'active'].includes(loan.status)
-      },
-      {
-        status: 'disbursed',
-        date: loan.disbursalDate || null,
-        description: 'Loan amount disbursed',
-        completed: ['disbursed', 'active'].includes(loan.status)
-      }
-    ];
-
-    // Get required documents
-    const requiredDocs = Document.findAll({
-      userId: req.user.id,
-      loanId: req.params.loanId
-    });
-
-    // Calculate progress percentage
-    const completedSteps = statusHistory.filter(step => step.completed).length;
-    const progressPercentage = (completedSteps / statusHistory.length) * 100;
-
-    res.json({
-      status: 'success',
-      data: {
-        loan: {
-          loanId: loan.loanId,
-          amount: loan.amount,
-          status: loan.status,
-          appliedDate: loan.createdAt,
-          expectedDisbursalDate: loan.expectedDisbursalDate
-        },
-        statusHistory,
-        progressPercentage,
-        requiredDocuments: requiredDocs.map(doc => ({
-          name: doc.name,
-          status: doc.status,
-          required: true
-        })),
-        nextAction: loan.status === 'pending' 
-          ? 'Complete document upload' 
-          : loan.status === 'under_review' 
-          ? 'Wait for approval' 
-          : loan.status === 'approved'
-          ? 'Complete agreement signing'
-          : 'No action required'
-      }
-    });
-
-  } catch (error) {
-    console.error('Get loan status error:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to fetch loan status'
-    });
-  }
-});
-
-// Cancel loan application
-router.post('/:loanId/cancel', authenticateToken, async (req, res) => {
-  try {
-    const { reason } = req.body;
-
-    const loan = Loan.findOne({
-      loanId: req.params.loanId,
-      userId: req.user.id
-    });
-
-    if (!loan) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Loan not found'
-      });
-    }
-
-    // Check if loan can be cancelled
-    if (!['pending', 'under_review'].includes(loan.status)) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Loan cannot be cancelled in current status'
-      });
-    }
-
-    // Update loan status
-    Loan.update(loan.id, {
-      status: 'cancelled',
-      cancellationReason: reason || 'Cancelled by user',
-      cancelledDate: new Date().toISOString()
-    });
-
-    res.json({
-      status: 'success',
-      message: 'Loan application cancelled successfully'
-    });
-
-  } catch (error) {
-    console.error('Cancel loan error:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to cancel loan application'
-    });
-  }
-});
-
-// Get EMI schedule
-router.get('/:loanId/emi-schedule', authenticateToken, async (req, res) => {
-  try {
-    const loan = Loan.findOne({
-      loanId: req.params.loanId,
-      userId: req.user.id
-    });
-
-    if (!loan) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Loan not found'
-      });
-    }
-
-    if (!['approved', 'disbursed', 'active'].includes(loan.status)) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'EMI schedule not available for current loan status'
-      });
-    }
-
-    // Generate EMI schedule
-    const principal = loan.amount;
-    const monthlyRate = loan.interestRate / (12 * 100);
-    const emi = loan.emi;
-    let remainingPrincipal = principal;
-    const schedule = [];
-
-    for (let month = 1; month <= loan.tenure; month++) {
-      const interestAmount = Math.round(remainingPrincipal * monthlyRate);
-      const principalAmount = emi - interestAmount;
-      remainingPrincipal -= principalAmount;
-
-      // Calculate due date (assuming disbursal date + months)
-      const dueDate = new Date(loan.disbursalDate || loan.approvedDate || new Date());
-      dueDate.setMonth(dueDate.getMonth() + month);
-
-      schedule.push({
-        month,
-        dueDate: dueDate.toISOString().split('T')[0],
-        emi,
-        principalAmount,
-        interestAmount,
-        remainingBalance: Math.max(0, remainingPrincipal),
-        status: month <= (loan.paidEmis || 0) ? 'paid' : 'pending'
-      });
-
-      if (remainingPrincipal <= 0) break;
-    }
-
-    res.json({
-      status: 'success',
-      data: {
-        loanId: loan.loanId,
-        principal,
-        interestRate: loan.interestRate,
-        tenure: loan.tenure,
-        emi,
-        totalInterest: (emi * loan.tenure) - principal,
-        totalAmount: emi * loan.tenure,
-        paidEmis: loan.paidEmis || 0,
-        remainingEmis: loan.tenure - (loan.paidEmis || 0),
-        schedule
-      }
-    });
-
-  } catch (error) {
-    console.error('Get EMI schedule error:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to generate EMI schedule'
-    });
-  }
-});
-
-// Pre-closure calculation
-router.get('/:loanId/preclosure', authenticateToken, async (req, res) => {
-  try {
-    const loan = Loan.findOne({
-      loanId: req.params.loanId,
-      userId: req.user.id
-    });
-
-    if (!loan) {
-      return res.status(404).json({
-        status: 'error',
-        message: 'Loan not found'
-      });
-    }
-
-    if (!['active'].includes(loan.status)) {
-      return res.status(400).json({
-        status: 'error',
-        message: 'Pre-closure not available for current loan status'
-      });
-    }
-
-    // Calculate pre-closure amount
-    const paidEmis = loan.paidEmis || 0;
-    const remainingEmis = loan.tenure - paidEmis;
-    const monthlyRate = loan.interestRate / (12 * 100);
-    
-    // Calculate outstanding principal
-    let outstandingPrincipal = loan.amount;
-    for (let i = 1; i <= paidEmis; i++) {
-      const interestAmount = outstandingPrincipal * monthlyRate;
-      const principalAmount = loan.emi - interestAmount;
-      outstandingPrincipal -= principalAmount;
-    }
-
-    // Pre-closure charges (typically 2-4% of outstanding principal)
-    const preclosureCharges = Math.round(outstandingPrincipal * 0.02);
-    const totalPreclosureAmount = Math.round(outstandingPrincipal) + preclosureCharges;
-
-    // Calculate savings
-    const remainingInterest = (loan.emi * remainingEmis) - outstandingPrincipal;
-    const savings = remainingInterest - preclosureCharges;
-
-    res.json({
-      status: 'success',
-      data: {
-        loanId: loan.loanId,
-        outstandingPrincipal: Math.round(outstandingPrincipal),
-        preclosureCharges,
-        totalPreclosureAmount,
-        remainingEmis,
-        remainingInterest,
-        savings,
-        eligibleForPreclosure: paidEmis >= 6, // Minimum 6 EMIs paid
-        message: paidEmis < 6 
-          ? 'Pre-closure available after paying minimum 6 EMIs' 
-          : `You can save ₹${savings.toLocaleString()} by pre-closing this loan`
-      }
-    });
-
-  } catch (error) {
-    console.error('Pre-closure calculation error:', error);
-    res.status(500).json({
-      status: 'error',
-      message: 'Failed to calculate pre-closure amount'
+      success: false,
+      message: 'Internal server error while checking eligibility'
     });
   }
 });

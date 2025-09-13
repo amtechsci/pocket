@@ -86,18 +86,6 @@ export function Header() {
             </Button>
           </div>
 
-          {/* Mobile Actions - Show Apply button on mobile */}
-          <div className="flex items-center gap-2 lg:hidden">
-            <Button 
-              style={{ backgroundColor: '#00C49A' }}
-              className="text-white hover:opacity-90 text-xs px-3 py-2 h-8"
-              asChild
-            >
-              <Link to="/application">
-                Apply
-              </Link>
-            </Button>
-          </div>
 
           {/* Mobile Menu */}
           <div className="lg:hidden ml-2">

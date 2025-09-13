@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Header } from './components/Header';
 import { Footer } from './components/Footer';
 import { HomePage } from './components/pages/HomePage';
 import { PersonalLoanPage } from './components/pages/PersonalLoanPage';
 import { BusinessLoanPage } from './components/pages/BusinessLoanPage';
 import { AuthPage } from './components/pages/AuthPage';
+import { AdminLoginPage } from './components/pages/AdminLoginPage';
+import { ProfileCompletionPage } from './components/pages/ProfileCompletionPage';
 import { DashboardPage } from './components/pages/DashboardPage';
 import { PayEMIPage } from './components/pages/PayEMIPage';
 import { LoanDetailsPage } from './components/pages/LoanDetailsPage';
@@ -116,20 +119,15 @@ function NotFoundPage() {
     }
 
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    // Check if user is authenticated from localStorage
-    return localStorage.getItem('isAuthenticated') === 'true';
-  });
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  );
+}
 
-  const handleLogin = () => {
-    setIsAuthenticated(true);
-    localStorage.setItem('isAuthenticated', 'true');
-  };
-
-  const handleLogout = () => {
-    setIsAuthenticated(false);
-    localStorage.removeItem('isAuthenticated');
-  };
+function AppContent() {
+  const { isAuthenticated } = useAuth();
 
   return (
     <div className="min-h-screen">
@@ -249,7 +247,13 @@ export default function App() {
         
         <Route path="/auth" element={
           <LayoutWithHeaderFooter>
-            <AuthPage onLogin={handleLogin} />
+            <AuthPage />
+          </LayoutWithHeaderFooter>
+        } />
+        
+        <Route path="/admin/login" element={
+          <LayoutWithHeaderFooter>
+            <AdminLoginPage />
           </LayoutWithHeaderFooter>
         } />
         
@@ -262,6 +266,12 @@ export default function App() {
         <Route path="/admin-access" element={<AdminAccessPage />} />
         
         {/* Dashboard Pages (No Header/Footer) */}
+        <Route path="/profile-completion" element={
+          <DashboardLayout>
+            <ProfileCompletionPage />
+          </DashboardLayout>
+        } />
+        
         <Route path="/dashboard" element={
           <DashboardLayout>
             <DashboardPage />

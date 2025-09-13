@@ -1,25 +1,24 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Phone, Key, Eye, EyeOff } from 'lucide-react';
+import { Phone, Key } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
-import { toast } from 'sonner@2.0.3';
+import { toast } from 'sonner';
+import { useAuth } from '../../contexts/AuthContext';
+import { Logo } from '../Logo';
 
-
-interface AuthPageProps {
-  onLogin: (isAuthenticated: boolean) => void;
-}
-
-export function AuthPage({ onLogin }: AuthPageProps) {
+export function AuthPage() {
   const navigate = useNavigate();
+  const { loginWithOTP, sendOTP } = useAuth();
   const [authMode, setAuthMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
   const [mobileNumber, setMobileNumber] = useState('');
   const [otp, setOtp] = useState('');
   const [showOtp, setShowOtp] = useState(false);
   const [loading, setLoading] = useState(false);
   const [timer, setTimer] = useState(0);
+  const [consentChecked, setConsentChecked] = useState(false);
 
   const validateMobileNumber = (number: string) => {
     const mobileRegex = /^[6-9]\d{9}$/;
@@ -32,25 +31,38 @@ export function AuthPage({ onLogin }: AuthPageProps) {
       return;
     }
 
-    setLoading(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    setShowOtp(true);
-    setTimer(60);
-    setLoading(false);
-    toast.success('OTP sent successfully to your mobile number');
+    if (!consentChecked) {
+      toast.error('Please agree to the terms and conditions to continue');
+      return;
+    }
 
-    // Timer countdown
-    const interval = setInterval(() => {
-      setTimer((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+    setLoading(true);
+    try {
+      const result = await sendOTP(mobileNumber);
+      
+      if (result.success) {
+        setShowOtp(true);
+        setTimer(60);
+        toast.success('OTP sent successfully to your mobile number');
+
+        // Timer countdown
+        const interval = setInterval(() => {
+          setTimer((prev) => {
+            if (prev <= 1) {
+              clearInterval(interval);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+      } else {
+        toast.error(result.message);
+      }
+    } catch (error) {
+      toast.error('Failed to send OTP. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const verifyOtp = async () => {
@@ -60,18 +72,19 @@ export function AuthPage({ onLogin }: AuthPageProps) {
     }
 
     setLoading(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Mock OTP verification (in real app, this would be validated by backend)
-    if (otp === '123456') {
+    try {
+      const result = await loginWithOTP(mobileNumber, otp);
+      
+      if (result.success) {
+        toast.success(authMode === 'signin' ? 'Login successful!' : 'Account created successfully!');
+        navigate('/dashboard');
+      } else {
+        toast.error(result.message);
+      }
+    } catch (error) {
+      toast.error('OTP verification failed. Please try again.');
+    } finally {
       setLoading(false);
-      toast.success(authMode === 'signin' ? 'Login successful!' : 'Account created successfully!');
-      onLogin(true);
-      navigate('/home');
-    } else {
-      setLoading(false);
-      toast.error('Invalid OTP. Please try again.');
     }
   };
 
@@ -85,6 +98,7 @@ export function AuthPage({ onLogin }: AuthPageProps) {
     setOtp('');
     setShowOtp(false);
     setTimer(0);
+    setConsentChecked(false);
   };
 
   const switchAuthMode = (mode: 'signin' | 'signup' | 'forgot') => {
@@ -113,29 +127,12 @@ export function AuthPage({ onLogin }: AuthPageProps) {
   return (
     <div className="min-h-screen py-12" style={{ backgroundColor: '#F0F4F8' }}>
       <div className="container mx-auto px-4 max-w-md">
-        {/* Back Button */}
-        <Button
-          variant="ghost"
-          onClick={() => navigate('/home')}
-          className="mb-6 p-2"
-        >
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Back to Home
-        </Button>
 
         <Card className="shadow-lg">
           <CardHeader className="text-center pb-6">
             {/* Logo */}
-            <div className="flex items-center justify-center gap-2 mb-4">
-              <div 
-                className="w-12 h-12 rounded-lg flex items-center justify-center"
-                style={{ backgroundColor: '#0052FF' }}
-              >
-                <span className="text-white font-bold text-xl">PC</span>
-              </div>
-              <span className="text-2xl font-semibold" style={{ color: '#1E2A3B' }}>
-                Pocket Credit
-              </span>
+            <div className="flex items-center justify-center mb-4">
+              <Logo size="lg" />
             </div>
             
             <CardTitle style={{ color: '#1E2A3B' }}>
@@ -152,6 +149,9 @@ export function AuthPage({ onLogin }: AuthPageProps) {
               <div className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="mobile">Mobile Number</Label>
+                  <p className="text-xs text-gray-500">
+                    Please enter phone number linked to your Aadhaar Card
+                  </p>
                   <div className="relative">
                     <Phone className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                     <Input
@@ -164,14 +164,48 @@ export function AuthPage({ onLogin }: AuthPageProps) {
                       maxLength={10}
                     />
                   </div>
-                  <p className="text-xs text-gray-500">
-                    We'll send an OTP to this number for verification
-                  </p>
+                </div>
+
+                {/* Disclaimer and Consent */}
+                <div className="space-y-3 p-4 bg-gray-50 rounded-lg">
+                  <div className="flex items-start space-x-2">
+                    <input
+                      type="checkbox"
+                      id="consent"
+                      checked={consentChecked}
+                      onChange={(e) => setConsentChecked(e.target.checked)}
+                      className="mt-1 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                    />
+                    <label htmlFor="consent" className="text-xs text-gray-700 leading-relaxed" style={{ paddingLeft: '5px' }}>
+                      By continuing, I hereby agree/authorize the following:
+                    </label>
+                  </div>
+                  
+                  <div className="ml-6 space-y-2">
+                    <p className="text-xs text-gray-700 leading-relaxed" style={{ fontSize: '10px' }}>1. PocketCredit{' '}
+                      <button
+                        onClick={() => window.open('/terms', '_blank')}
+                        className="text-blue-600 hover:underline"
+                      >
+                        T&C
+                      </button>
+                      {' '}&{' '}
+                      <button
+                        onClick={() => window.open('/privacy', '_blank')}
+                        className="text-blue-600 hover:underline"
+                      >
+                        privacy policy
+                      </button>
+                    </p>
+                    <p className="text-xs text-gray-700 leading-relaxed" style={{ fontSize: '10px' }}>2. I am an Indian citizen above 21 years of age.</p>
+                    <p className="text-xs text-gray-700 leading-relaxed" style={{ fontSize: '10px' }}>3. I give my explicit consent and authorize PocketCredit and its partners to contact me via calls, SMS, IVR, auto-calls, WhatsApp and email for transactional, service, and promotional purposes, even if I am registered on DND/NDNC. I confirm that I am applying for a financial product and this consent forms part of my application.</p>
+                    <p className="text-xs text-gray-700 leading-relaxed" style={{ fontSize: '10px' }}>4. I declare that I can read and understand English and agree to receive all documents/ correspondence in English.</p>
+                  </div>
                 </div>
 
                 <Button
                   onClick={sendOtp}
-                  disabled={loading || !validateMobileNumber(mobileNumber)}
+                  disabled={loading || !validateMobileNumber(mobileNumber) || !consentChecked}
                   style={{ backgroundColor: '#0052FF' }}
                   className="w-full"
                 >
@@ -289,6 +323,7 @@ export function AuthPage({ onLogin }: AuthPageProps) {
                 )}
               </div>
             )}
+
 
             {/* Terms and Privacy */}
             <div className="text-center pt-4">

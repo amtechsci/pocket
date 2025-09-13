@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ArrowLeft, ArrowRight, CheckCircle, Upload, FileText, Shield, CreditCard, User, MapPin, Phone, Mail, Calendar, Building, Smartphone, Camera, PenTool, Zap, Banknote } from 'lucide-react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -8,6 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Separator } from './ui/separator';
 import { toast } from 'sonner@2.0.3';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { apiService, EligibilityCheck } from '../services/api';
 
 interface ApplicationFlowProps {
   onNavigate?: (page: Page) => void;
@@ -46,8 +48,18 @@ interface ApplicationData {
 
 export function ApplicationFlow({ onNavigate }: ApplicationFlowProps) {
   const navigate = useNavigate();
+  const { user, isAuthenticated } = useAuth();
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [eligibilityData, setEligibilityData] = useState<EligibilityCheck | null>(null);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      navigate('/auth');
+      return;
+    }
+  }, [isAuthenticated, navigate]);
+
   const [applicationData, setApplicationData] = useState<ApplicationData>({
     panNumber: '',
     monthlyIncome: '',
@@ -177,11 +189,27 @@ export function ApplicationFlow({ onNavigate }: ApplicationFlowProps) {
 
   const completeApplication = async () => {
     setLoading(true);
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
-    setLoading(false);
-    toast.success('Application completed successfully! Loan will be disbursed within 24 hours.');
-    navigate('/dashboard');
+    try {
+      const loanData = {
+        loan_amount: parseFloat(applicationData.loanAmount),
+        loan_purpose: applicationData.loanPurpose,
+        loan_tenure_days: 30, // Default to 30 days
+      };
+
+      const response = await apiService.applyForLoan(loanData);
+      
+      if (response.success) {
+        toast.success('Loan application submitted successfully!');
+        navigate('/dashboard');
+      } else {
+        toast.error(response.message || 'Failed to submit loan application');
+      }
+    } catch (error) {
+      console.error('Loan application error:', error);
+      toast.error('Failed to submit loan application. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const renderStepIndicator = () => {

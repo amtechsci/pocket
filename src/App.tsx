@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { getAuthenticatedRedirect } from './utils/navigation';
 import { Header } from './components/Header';
 import { Footer } from './components/Footer';
 import { HomePage } from './components/pages/HomePage';
@@ -8,12 +9,15 @@ import { PersonalLoanPage } from './components/pages/PersonalLoanPage';
 import { BusinessLoanPage } from './components/pages/BusinessLoanPage';
 import { AuthPage } from './components/pages/AuthPage';
 import { AdminLoginPage } from './components/pages/AdminLoginPage';
-import { ProfileCompletionPage } from './components/pages/ProfileCompletionPage';
-import { DashboardPage } from './components/pages/DashboardPage';
+import { ProfileCompletionPageSimple as ProfileCompletionPage } from './components/pages/ProfileCompletionPageSimple';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { DynamicDashboardPage as DashboardPage } from './components/pages/DynamicDashboardPage';
+import { AuthOnlyRoute, ProtectedRoute } from './components/ProtectedRoute';
 import { PayEMIPage } from './components/pages/PayEMIPage';
-import { LoanDetailsPage } from './components/pages/LoanDetailsPage';
-import { PaymentHistoryPage } from './components/pages/PaymentHistoryPage';
-import { DocumentUploadPage } from './components/pages/DocumentUploadPage';
+import { DynamicLoanDetailsPage as LoanDetailsPage } from './components/pages/DynamicLoanDetailsPage';
+import { DynamicPaymentHistoryPage as PaymentHistoryPage } from './components/pages/DynamicPaymentHistoryPage';
+import { DynamicDocumentUploadPage as DocumentUploadPage } from './components/pages/DynamicDocumentUploadPage';
+import { LoanApplicationPage } from './components/pages/LoanApplicationPage';
 import { ApplicationFlow } from './components/ApplicationFlow';
 import { CreditScorePage } from './components/pages/CreditScorePage';
 import { ResourcesPage } from './components/pages/ResourcesPage';
@@ -127,7 +131,19 @@ export default function App() {
 }
 
 function AppContent() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user, isLoading } = useAuth();
+
+  // Show loading spinner while checking authentication
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  // Use centralized navigation utility
+  const getRedirectPath = () => getAuthenticatedRedirect(user);
 
   return (
     <div className="min-h-screen">
@@ -140,13 +156,9 @@ function AppContent() {
         } />
         
         <Route path="/home" element={
-          isAuthenticated ? (
-            <Navigate to="/dashboard" replace />
-          ) : (
-            <LayoutWithHeaderFooter>
-              <HomePage />
-            </LayoutWithHeaderFooter>
-          )
+          <LayoutWithHeaderFooter>
+            <HomePage />
+          </LayoutWithHeaderFooter>
         } />
         
         <Route path="/personal-loan" element={
@@ -247,7 +259,9 @@ function AppContent() {
         
         <Route path="/auth" element={
           <LayoutWithHeaderFooter>
-            <AuthPage />
+            <AuthOnlyRoute>
+              <AuthPage />
+            </AuthOnlyRoute>
           </LayoutWithHeaderFooter>
         } />
         
@@ -258,24 +272,38 @@ function AppContent() {
         } />
         
         <Route path="/application" element={
-          <LayoutWithHeaderFooter>
-            <ApplicationFlow />
-          </LayoutWithHeaderFooter>
+          <DashboardLayout>
+            <LoanApplicationPage />
+          </DashboardLayout>
         } />
         
         <Route path="/admin-access" element={<AdminAccessPage />} />
         
         {/* Dashboard Pages (No Header/Footer) */}
         <Route path="/profile-completion" element={
-          <DashboardLayout>
-            <ProfileCompletionPage />
-          </DashboardLayout>
+          isAuthenticated ? (
+            <DashboardLayout>
+              <ErrorBoundary>
+                <ProfileCompletionPage />
+              </ErrorBoundary>
+            </DashboardLayout>
+          ) : (
+            <Navigate to="/auth" replace />
+          )
         } />
         
         <Route path="/dashboard" element={
-          <DashboardLayout>
-            <DashboardPage />
-          </DashboardLayout>
+          isAuthenticated ? (
+            user?.profile_completion_step >= 4 ? (
+              <DashboardLayout>
+                <DashboardPage />
+              </DashboardLayout>
+            ) : (
+              <Navigate to="/profile-completion" replace />
+            )
+          ) : (
+            <Navigate to="/auth" replace />
+          )
         } />
         
         <Route path="/pay-emi" element={
@@ -284,7 +312,7 @@ function AppContent() {
           </DashboardLayout>
         } />
         
-        <Route path="/loan-details" element={
+        <Route path="/loan-details/:loanId" element={
           <DashboardLayout>
             <LoanDetailsPage />
           </DashboardLayout>
@@ -320,6 +348,7 @@ function AppContent() {
             <DocumentUploadPage />
           </DashboardLayout>
         } />
+        
         
         <Route path="/support" element={
           <DashboardLayout>

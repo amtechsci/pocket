@@ -1,14 +1,17 @@
 import { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Menu, X, User } from 'lucide-react';
 import { Button } from './ui/button';
 import { Sheet, SheetContent, SheetTrigger, SheetHeader, SheetTitle, SheetDescription } from './ui/sheet';
 import { Logo } from './Logo';
+import { useAuth } from '../contexts/AuthContext';
+import { handleLogoClick, handleLoginClick } from '../utils/navigation';
 
 export function Header() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const location = useLocation();
-  const isAuthenticated = false; // This should come from context or props
+  const navigate = useNavigate();
+  const { isAuthenticated, user } = useAuth();
 
   const navigationItems = [
     { label: 'Home', path: '/' },
@@ -28,9 +31,11 @@ export function Header() {
       <div className="container mx-auto mobile-container">
         <div className="flex h-14 sm:h-16 items-center justify-between">
           {/* Logo */}
-          <Link to="/">
-            <Logo size="md" variant="default" />
-          </Link>
+          <Logo 
+            size="md" 
+            variant="default" 
+            onClick={() => handleLogoClick(navigate, isAuthenticated, user)}
+          />
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center gap-8">
@@ -52,26 +57,29 @@ export function Header() {
           {/* Desktop Actions */}
           <div className="hidden lg:flex items-center gap-3 xl:gap-4">
             {isAuthenticated ? (
-              <Button
-                variant="outline"
-                className="flex items-center gap-2"
-                size="sm"
-                asChild
-              >
-                <Link to="/dashboard">
-                  <User className="h-4 w-4" />
-                  Dashboard
-                </Link>
-              </Button>
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-gray-700">
+                  Welcome, {user?.first_name || 'User'}
+                </span>
+                <Button
+                  variant="outline"
+                  className="flex items-center gap-2"
+                  size="sm"
+                  asChild
+                >
+                  <Link to="/dashboard">
+                    <User className="h-4 w-4" />
+                    Dashboard
+                  </Link>
+                </Button>
+              </div>
             ) : (
               <Button
                 variant="outline"
                 size="sm"
-                asChild
+                onClick={() => handleLoginClick(navigate, isAuthenticated, user)}
               >
-                <Link to="/auth">
-                  Login
-                </Link>
+                Login
               </Button>
             )}
             <Button 
@@ -120,25 +128,31 @@ export function Header() {
                   ))}
                   <div className="border-t pt-4 mt-4 space-y-3">
                     {isAuthenticated ? (
-                      <Button
-                        variant="outline"
-                        className="w-full py-3 flex items-center justify-center gap-2 touch-manipulation"
-                        asChild
-                      >
-                        <Link to="/dashboard" onClick={() => setIsMobileMenuOpen(false)}>
-                          <User className="h-4 w-4" />
-                          Dashboard
-                        </Link>
-                      </Button>
+                      <div className="space-y-2">
+                        <div className="text-sm text-gray-600 px-4 py-2">
+                          Welcome, {user?.first_name || 'User'}
+                        </div>
+                        <Button
+                          variant="outline"
+                          className="w-full py-3 flex items-center justify-center gap-2 touch-manipulation"
+                          asChild
+                        >
+                          <Link to="/dashboard" onClick={() => setIsMobileMenuOpen(false)}>
+                            <User className="h-4 w-4" />
+                            Dashboard
+                          </Link>
+                        </Button>
+                      </div>
                     ) : (
                       <Button
                         variant="outline"
                         className="w-full py-3 touch-manipulation"
-                        asChild
+                        onClick={() => {
+                          handleLoginClick(navigate, isAuthenticated, user);
+                          setIsMobileMenuOpen(false);
+                        }}
                       >
-                        <Link to="/auth" onClick={() => setIsMobileMenuOpen(false)}>
-                          Login
-                        </Link>
+                        Login
                       </Button>
                     )}
                     <Button 

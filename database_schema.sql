@@ -12,17 +12,19 @@ USE pocket;
 -- =====================================================
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    email VARCHAR(255) UNIQUE NOT NULL,
+    email VARCHAR(255) UNIQUE NULL,
     phone VARCHAR(20) UNIQUE NOT NULL,
-    first_name VARCHAR(100),
-    last_name VARCHAR(100),
-    date_of_birth DATE,
-    gender ENUM('male', 'female', 'other'),
-    marital_status ENUM('single', 'married', 'divorced', 'widowed'),
+    first_name VARCHAR(100) NULL,
+    last_name VARCHAR(100) NULL,
+    date_of_birth DATE NULL,
+    gender ENUM('male', 'female', 'other') NULL,
+    marital_status ENUM('single', 'married', 'divorced', 'widowed') NULL,
     status ENUM('active', 'inactive', 'suspended') DEFAULT 'active',
     email_verified BOOLEAN DEFAULT FALSE,
     phone_verified BOOLEAN DEFAULT FALSE,
     kyc_completed BOOLEAN DEFAULT FALSE,
+    profile_completion_step INT DEFAULT 1,
+    profile_completed BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     last_login_at TIMESTAMP NULL,
@@ -30,7 +32,8 @@ CREATE TABLE IF NOT EXISTS users (
     INDEX idx_email (email),
     INDEX idx_phone (phone),
     INDEX idx_status (status),
-    INDEX idx_created_at (created_at)
+    INDEX idx_created_at (created_at),
+    INDEX idx_profile_completion_step (profile_completion_step)
 );
 
 -- =====================================================
@@ -66,20 +69,38 @@ CREATE TABLE IF NOT EXISTS financial_details (
     monthly_expenses DECIMAL(12,2),
     existing_loans DECIMAL(12,2) DEFAULT 0,
     credit_score INT,
-    bank_name VARCHAR(255),
-    account_number VARCHAR(50),
-    ifsc_code VARCHAR(20),
-    account_holder_name VARCHAR(255),
-    account_type ENUM('savings', 'current', 'salary') DEFAULT 'savings',
-    is_primary BOOLEAN DEFAULT FALSE,
     financial_verified BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_user_id (user_id),
-    INDEX idx_primary_account (is_primary),
     INDEX idx_verified (financial_verified)
+);
+
+-- =====================================================
+-- 3.1. BANK DETAILS TABLE
+-- =====================================================
+CREATE TABLE IF NOT EXISTS bank_details (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    bank_name VARCHAR(255) NOT NULL,
+    account_number VARCHAR(50) NOT NULL,
+    ifsc_code VARCHAR(20) NOT NULL,
+    account_holder_name VARCHAR(255) NOT NULL,
+    account_type ENUM('savings', 'current', 'salary') DEFAULT 'savings',
+    branch_name VARCHAR(255),
+    is_primary BOOLEAN DEFAULT FALSE,
+    is_verified BOOLEAN DEFAULT FALSE,
+    verification_date TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_user_id (user_id),
+    INDEX idx_primary_account (is_primary),
+    INDEX idx_verified (is_verified),
+    INDEX idx_bank_name (bank_name)
 );
 
 -- =====================================================
@@ -329,13 +350,10 @@ CREATE TABLE IF NOT EXISTS member_tiers (
     id INT AUTO_INCREMENT PRIMARY KEY,
     tier_name VARCHAR(50) UNIQUE NOT NULL,
     tier_display_name VARCHAR(100) NOT NULL,
-    min_credit_score INT,
-    max_credit_score INT,
-    min_loan_amount DECIMAL(12,2),
-    max_loan_amount DECIMAL(12,2),
-    interest_rate_range_min DECIMAL(5,2),
-    interest_rate_range_max DECIMAL(5,2),
-    processing_fee_percentage DECIMAL(5,2),
+    max_loan_amount_type ENUM('fixed', 'percentage') DEFAULT 'fixed',
+    max_loan_amount DECIMAL(12,2) NOT NULL,
+    interest_rate_daily DECIMAL(8,4) NOT NULL,
+    processing_fee DECIMAL(5,2) NOT NULL,
     benefits JSON,
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -343,7 +361,7 @@ CREATE TABLE IF NOT EXISTS member_tiers (
     
     INDEX idx_tier_name (tier_name),
     INDEX idx_is_active (is_active),
-    INDEX idx_credit_score_range (min_credit_score, max_credit_score)
+    INDEX idx_loan_amount_type (max_loan_amount_type)
 );
 
 -- =====================================================
@@ -375,11 +393,11 @@ CREATE TABLE IF NOT EXISTS addresses (
 -- =====================================================
 
 -- Insert default member tiers
-INSERT INTO member_tiers (tier_name, tier_display_name, min_credit_score, max_credit_score, min_loan_amount, max_loan_amount, interest_rate_range_min, interest_rate_range_max, processing_fee_percentage, benefits) VALUES
-('bronze', 'Bronze Member', 300, 599, 50000, 500000, 18.0, 24.0, 2.0, '{"features": ["Basic loan processing", "Standard customer support"], "discounts": []}'),
-('silver', 'Silver Member', 600, 699, 100000, 1000000, 15.0, 20.0, 1.5, '{"features": ["Priority processing", "Dedicated support"], "discounts": ["Processing fee discount"]}'),
-('gold', 'Gold Member', 700, 799, 200000, 2000000, 12.0, 18.0, 1.0, '{"features": ["VIP processing", "Personal loan manager"], "discounts": ["Processing fee waiver", "Interest rate discount"]}'),
-('platinum', 'Platinum Member', 800, 900, 500000, 5000000, 10.0, 15.0, 0.5, '{"features": ["Instant approval", "Premium support", "Custom rates"], "discounts": ["All fees waived", "Best rates"]}');
+INSERT INTO member_tiers (tier_name, tier_display_name, max_loan_amount_type, max_loan_amount, interest_rate_daily, processing_fee, benefits) VALUES
+('bronze', 'Bronze Member', 'fixed', 500000, 0.0411, 2.0, '{"features": ["Basic loan processing", "Standard customer support"], "discounts": []}'),
+('silver', 'Silver Member', 'percentage', 80, 0.0342, 1.5, '{"features": ["Priority processing", "Dedicated support"], "discounts": ["Processing fee discount"]}'),
+('gold', 'Gold Member', 'percentage', 120, 0.0274, 1.0, '{"features": ["VIP processing", "Personal loan manager"], "discounts": ["Processing fee waiver", "Interest rate discount"]}'),
+('platinum', 'Platinum Member', 'fixed', 5000000, 0.0205, 0.5, '{"features": ["Instant approval", "Premium support", "Custom rates"], "discounts": ["All fees waived", "Best rates"]}');
 
 -- Insert default system settings
 INSERT INTO system_settings (setting_key, setting_value, description, data_type, is_public) VALUES

@@ -1,6 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
-const { User, Admin, OtpCode, LoginHistory } = require('../utils/database');
+const { findUserByMobileNumber, findUserById, createUser, updateLastLogin } = require('../models/user');
+const { createOrUpdateVerificationRecord } = require('../models/verification');
 const { generateToken, verifyToken } = require('../middleware/auth');
 const { validate, schemas } = require('../middleware/validation');
 const router = express.Router();

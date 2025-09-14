@@ -11,7 +11,7 @@ import { Logo } from '../Logo';
 
 export function AuthPage() {
   const navigate = useNavigate();
-  const { loginWithOTP, sendOTP } = useAuth();
+  const { loginWithOTP } = useAuth();
   const [authMode, setAuthMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
   const [mobileNumber, setMobileNumber] = useState('');
   const [otp, setOtp] = useState('');
@@ -19,6 +19,7 @@ export function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [timer, setTimer] = useState(0);
   const [consentChecked, setConsentChecked] = useState(false);
+
 
   const validateMobileNumber = (number: string) => {
     const mobileRegex = /^[6-9]\d{9}$/;
@@ -36,15 +37,28 @@ export function AuthPage() {
       return;
     }
 
+    // Set loading state immediately
     setLoading(true);
+    
     try {
-      const result = await sendOTP(mobileNumber);
+      // Call the API service directly to avoid context loading state conflicts
+      const response = await fetch('http://localhost:3002/api/auth/send-otp', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include', // Important for session management
+        body: JSON.stringify({ mobile: mobileNumber }),
+      });
+
+      const result = await response.json();
       
-      if (result.success) {
+      if (response.ok && result.status === 'success') {
+        // On success, update the state IMMEDIATELY to show the OTP form
         setShowOtp(true);
         setTimer(60);
         toast.success('OTP sent successfully to your mobile number');
-
+        
         // Timer countdown
         const interval = setInterval(() => {
           setTimer((prev) => {
@@ -56,11 +70,16 @@ export function AuthPage() {
           });
         }, 1000);
       } else {
-        toast.error(result.message);
+        // Handle API errors
+        console.error('OTP send failed:', result.message);
+        toast.error(result.message || 'Failed to send OTP');
       }
     } catch (error) {
+      // Handle network or other unexpected errors
+      console.error('Failed to send OTP:', error);
       toast.error('Failed to send OTP. Please try again.');
     } finally {
+      // This ALWAYS runs last, after the try or catch block
       setLoading(false);
     }
   };
@@ -76,7 +95,11 @@ export function AuthPage() {
       const result = await loginWithOTP(mobileNumber, otp);
       
       if (result.success) {
-        toast.success(authMode === 'signin' ? 'Login successful!' : 'Account created successfully!');
+        toast.success('Login successful!');
+        
+        // Check if user needs to complete profile
+        // The AuthContext will handle this based on profile_completion_step
+        // For now, navigate to dashboard - the App component will handle routing
         navigate('/dashboard');
       } else {
         toast.error(result.message);
@@ -245,7 +268,7 @@ export function AuthPage() {
                     />
                   </div>
                   <p className="text-xs text-gray-500 text-center">
-                    For demo purposes, use OTP: <strong>123456</strong>
+                    Enter the 6-digit OTP sent to your mobile number
                   </p>
                 </div>
 

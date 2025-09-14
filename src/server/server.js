@@ -1,13 +1,21 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const cookieParser = require('cookie-parser');
 const path = require('path');
 const fs = require('fs');
 const rateLimit = require('express-rate-limit');
+require('dotenv').config();
+
+// Import configuration
+const { initializeDatabase } = require('./config/database');
+const { initializeRedis } = require('./config/redis');
+const { initializeSession, sessionCleanup } = require('./middleware/session');
 
 // Import routes
-const authRoutes = require('./routes/auth');
-const userRoutes = require('./routes/users');
+const authRoutes = require('./routes/authRoutes');
+const userRoutes = require('./routes/userRoutes');
+const loanApplicationRoutes = require('./routes/loanApplicationRoutes');
 const loanRoutes = require('./routes/loans');
 const adminRoutes = require('./routes/admin');
 const documentRoutes = require('./routes/documents');
@@ -25,11 +33,13 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
-// Rate limiting
+// Rate limiting (more lenient for development)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
+  max: 1000, // limit each IP to 1000 requests per windowMs (increased for development)
+  message: 'Too many requests from this IP, please try again later.',
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 app.use('/api/', limiter);
 
@@ -38,12 +48,31 @@ app.use(cors({
   origin: ['http://localhost:5173', 'http://localhost:3000', 'https://localhost:5173'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id']
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id', 'Accept', 'Origin', 'X-Requested-With'],
+  optionsSuccessStatus: 200 // Some legacy browsers choke on 204
 }));
+
+// Handle preflight requests manually
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-user-id, Accept, Origin, X-Requested-With');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.sendStatus(200);
+});
 
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Cookie parser middleware
+app.use(cookieParser());
+
+// Session middleware
+app.use(initializeSession());
+
+// Session cleanup middleware
+// app.use(sessionCleanup());
 
 // Static file serving for uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -62,7 +91,8 @@ if (!fs.existsSync(uploadsDir)) {
 
 // API Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/users', userRoutes);
+app.use('/api/user', userRoutes);
+app.use('/api/loan-applications', loanApplicationRoutes);
 app.use('/api/loans', loanRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/documents', documentRoutes);
@@ -109,15 +139,33 @@ app.use((req, res) => {
   });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Pocket Credit API server running on port ${PORT}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
-  console.log(`📚 API Base URL: http://localhost:${PORT}/api`);
-  
-  // Initialize database if it doesn't exist
-  const initDB = require('./scripts/initDatabase');
-  initDB();
-});
+// Initialize database and Redis connections
+const startServer = async () => {
+  try {
+    // Initialize database connection
+    await initializeDatabase();
+    
+    // Initialize Redis connection
+    await initializeRedis();
+    
+    // Start the server
+    app.listen(PORT, () => {
+      console.log(`🚀 Pocket Credit API server running on port ${PORT}`);
+      console.log(`📊 Health check: http://localhost:${PORT}/api/health`);
+      console.log(`📚 API Base URL: http://localhost:${PORT}/api`);
+      console.log(`🔐 Authentication: http://localhost:${PORT}/api/auth`);
+      
+      // Initialize database if it doesn't exist
+      const initDB = require('./scripts/initDatabase');
+      initDB();
+    });
+  } catch (error) {
+    console.error('❌ Failed to start server:', error.message);
+    process.exit(1);
+  }
+};
+
+// Start the server
+startServer();
 
 module.exports = app;

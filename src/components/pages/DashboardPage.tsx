@@ -1,8 +1,17 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { apiService, UserProfile } from '../../services/api';
+import { User as UserType } from '../../services/api';
 import { Card } from '../ui/card';
+
+// Local interface for user profile data
+interface UserProfile {
+  user: UserType;
+  addresses?: any[];
+  employment?: any;
+  bankAccounts?: any[];
+  kycStatus?: any;
+}
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
@@ -50,76 +59,60 @@ export function DashboardPage() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Create mock user profile from AuthContext user data (no API call needed)
+  const createMockUserProfile = useCallback((user: UserType) => {
+    return {
+      user: user,
+      addresses: [],
+      employment: null,
+      bankAccounts: [],
+      kycStatus: {
+        id: 1,
+        user_id: user.id,
+        overall_status: 'not_started' as const,
+        completion_percentage: 0,
+        pan_verified: false,
+        aadhaar_verified: false,
+        address_verified: false,
+        bank_account_verified: false,
+        employment_verified: false,
+        video_kyc_verified: false,
+        pan_score: 0,
+        aadhaar_score: 0,
+        address_score: 0,
+        bank_score: 0,
+        employment_score: 0,
+        video_kyc_score: 0,
+        overall_score: 0,
+        risk_level: 'medium' as const,
+        risk_score: 50,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      }
+    };
+  }, []);
+
   useEffect(() => {
     if (!isAuthenticated) {
       navigate('/auth');
       return;
     }
 
-    loadUserProfile();
-  }, [isAuthenticated, navigate]);
-
-  // Check if user needs to complete profile
-  useEffect(() => {
-    if (user && userProfile) {
-      const kycStatus = userProfile.kycStatus;
-      const needsProfileCompletion = !kycStatus || 
-        kycStatus.overall_status === 'not_started' || 
-        kycStatus.overall_status === 'in_progress' ||
-        kycStatus.completion_percentage < 100;
-
-      if (needsProfileCompletion) {
-        navigate('/profile-completion');
-        return;
-      }
-    }
-  }, [user, userProfile, navigate]);
-
-  const loadUserProfile = async () => {
-    try {
-      const response = await apiService.getUserProfile();
-      if (response.success) {
-        setUserProfile(response.data);
-      }
-    } catch (error) {
-      console.error('Failed to load user profile:', error);
-      // If backend is not available, use mock data for demo
-      if (user) {
-        const mockUserProfile = {
-          user: user,
-          addresses: [],
-          employment: null,
-          bankAccounts: [],
-          kycStatus: {
-            id: 1,
-            user_id: user.id,
-            overall_status: 'not_started' as const,
-            completion_percentage: 0,
-            pan_verified: false,
-            aadhaar_verified: false,
-            address_verified: false,
-            bank_account_verified: false,
-            employment_verified: false,
-            video_kyc_verified: false,
-            pan_score: 0,
-            aadhaar_score: 0,
-            address_score: 0,
-            bank_score: 0,
-            employment_score: 0,
-            video_kyc_score: 0,
-            overall_score: 0,
-            risk_level: 'medium' as const,
-            risk_score: 50,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          }
-        };
-        setUserProfile(mockUserProfile);
-      }
-    } finally {
+    // Use user data from AuthContext instead of making API call
+    if (user) {
+      const mockProfile = createMockUserProfile(user);
+      setUserProfile(mockProfile);
       setLoading(false);
     }
-  };
+  }, [isAuthenticated, navigate, user, createMockUserProfile]);
+
+  // Check if user needs to complete profile based on profile_completion_step
+  useEffect(() => {
+    if (user && user.profile_completion_step && user.profile_completion_step < 4) {
+      navigate('/profile-completion');
+      return;
+    }
+  }, [user, navigate]);
 
   const handleLogout = async () => {
     try {

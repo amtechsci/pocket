@@ -4,6 +4,8 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Badge } from './ui/badge';
 import { Logo } from './Logo';
+import { useAuth } from '../contexts/AuthContext';
+import { handleLogoClick } from '../utils/navigation';
 
 interface DashboardHeaderProps {
   userName: string;
@@ -11,6 +13,7 @@ interface DashboardHeaderProps {
 
 export function DashboardHeader({ userName }: DashboardHeaderProps) {
   const navigate = useNavigate();
+  const { isAuthenticated, user } = useAuth();
   return (
     <header className="sticky top-0 z-40 w-full border-b bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60">
       <div className="container mx-auto px-4">
@@ -19,7 +22,7 @@ export function DashboardHeader({ userName }: DashboardHeaderProps) {
           <Logo 
             size="md" 
             variant="default" 
-            onClick={() => onNavigate('home')}
+            onClick={() => handleLogoClick(navigate, isAuthenticated, user)}
           />
 
           {/* Search Bar - Hidden on mobile */}

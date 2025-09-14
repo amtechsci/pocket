@@ -17,7 +17,10 @@ import { PayEMIPage } from './components/pages/PayEMIPage';
 import { DynamicLoanDetailsPage as LoanDetailsPage } from './components/pages/DynamicLoanDetailsPage';
 import { DynamicPaymentHistoryPage as PaymentHistoryPage } from './components/pages/DynamicPaymentHistoryPage';
 import { DynamicDocumentUploadPage as DocumentUploadPage } from './components/pages/DynamicDocumentUploadPage';
-import { LoanApplicationPage } from './components/pages/LoanApplicationPage';
+import { SimplifiedLoanApplicationPage } from './components/pages/SimplifiedLoanApplicationPage';
+import { BankDetailsPage } from './components/pages/BankDetailsPage';
+import { ReferenceDetailsPage } from './components/pages/ReferenceDetailsPage';
+import { LoanApplicationStepsPage } from './components/pages/LoanApplicationStepsPage';
 import { ApplicationFlow } from './components/ApplicationFlow';
 import { CreditScorePage } from './components/pages/CreditScorePage';
 import { ResourcesPage } from './components/pages/ResourcesPage';
@@ -273,7 +276,25 @@ function AppContent() {
         
         <Route path="/application" element={
           <DashboardLayout>
-            <LoanApplicationPage />
+            <SimplifiedLoanApplicationPage />
+          </DashboardLayout>
+        } />
+        
+        <Route path="/loan-application/bank-details" element={
+          <DashboardLayout>
+            <BankDetailsPage />
+          </DashboardLayout>
+        } />
+        
+        <Route path="/loan-application/references" element={
+          <DashboardLayout>
+            <ReferenceDetailsPage />
+          </DashboardLayout>
+        } />
+        
+        <Route path="/loan-application/steps" element={
+          <DashboardLayout>
+            <LoanApplicationStepsPage />
           </DashboardLayout>
         } />
         

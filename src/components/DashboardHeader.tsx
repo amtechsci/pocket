@@ -54,13 +54,13 @@ export function DashboardHeader({ userName }: DashboardHeaderProps) {
             {/* User Menu */}
             <div className="flex items-center gap-3 pl-3 border-l border-gray-200">
               <div className="hidden sm:block text-right">
-                <p className="text-sm font-medium text-gray-900">{userName}</p>
+                <p className="text-sm font-medium text-gray-900">{userName || 'User'}</p>
                 <p className="text-xs text-gray-500">Premium Member</p>
               </div>
               
               <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
                 <span className="text-sm font-semibold text-blue-600">
-                  {userName.split(' ').map(n => n[0]).join('')}
+                  {userName ? userName.split(' ').map(n => n[0]).join('') : 'U'}
                 </span>
               </div>
             </div>

@@ -25,6 +25,8 @@ const verificationRoutes = require('./routes/verification');
 const transactionRoutes = require('./routes/transactions');
 const notificationRoutes = require('./routes/notifications');
 const employmentRoutes = require('./routes/employment');
+const bankDetailsRoutes = require('./routes/bankDetails');
+const loanReferencesRoutes = require('./routes/loanReferences');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -103,6 +105,8 @@ app.use('/api/verification', verificationRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/employment-details', employmentRoutes);
+app.use('/api/bank-details', bankDetailsRoutes);
+app.use('/api/loan-references', loanReferencesRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

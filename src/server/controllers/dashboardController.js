@@ -93,7 +93,7 @@ const fetchDashboardData = async (userId) => {
       COUNT(*) as total_loans,
       SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_loans,
       SUM(CASE WHEN status = 'active' THEN loan_amount ELSE 0 END) as total_loan_amount,
-      SUM(CASE WHEN status = 'active' THEN (loan_amount - (emi_amount * tenure_months)) ELSE 0 END) as outstanding_amount
+      SUM(CASE WHEN status = 'active' THEN loan_amount ELSE 0 END) as outstanding_amount
     FROM loans 
     WHERE user_id = ?
   `;
@@ -108,17 +108,10 @@ const fetchDashboardData = async (userId) => {
       l.loan_amount,
       l.interest_rate,
       l.tenure_months,
-      l.emi_amount,
       l.status,
       l.disbursed_at,
-      l.first_emi_date,
       la.loan_purpose,
-      DATEDIFF(CURDATE(), l.disbursed_at) as days_since_disbursement,
-      CASE 
-        WHEN l.status = 'active' THEN 
-          GREATEST(0, DATEDIFF(CURDATE(), l.first_emi_date) / 30)
-        ELSE 0 
-      END as completed_months
+      DATEDIFF(CURDATE(), l.disbursed_at) as days_since_disbursement
     FROM loans l
     LEFT JOIN loan_applications la ON l.loan_application_id = la.id
     WHERE l.user_id = ? AND l.status = 'active'
@@ -126,38 +119,22 @@ const fetchDashboardData = async (userId) => {
   `;
   const activeLoans = await executeQuery(activeLoansQuery, [userId]);
 
-  // Calculate outstanding amount for each loan
+  // Calculate outstanding amount for each loan (simplified without EMI data)
   const loansWithOutstanding = (activeLoans || []).map(loan => {
-    const completedMonths = Math.floor(loan.completed_months || 0);
-    const paidAmount = completedMonths * (loan.emi_amount || 0);
-    const outstandingAmount = Math.max(0, (loan.loan_amount || 0) - paidAmount);
+    // Since we don't have EMI data, we'll show the full loan amount as outstanding
+    // This can be updated later when EMI tracking is implemented
+    const outstandingAmount = loan.loan_amount || 0;
     
     return {
       ...loan,
       outstanding_amount: outstandingAmount,
-      completed_tenure: Math.min(completedMonths, loan.tenure_months || 0),
-      progress_percentage: Math.min(((completedMonths / (loan.tenure_months || 1)) * 100), 100)
+      completed_tenure: 0, // No EMI tracking available
+      progress_percentage: 0 // No EMI tracking available
     };
   });
 
-  // Get upcoming payments (next 3 EMIs)
-  const upcomingPaymentsQuery = `
-    SELECT 
-      l.id as loan_id,
-      l.loan_number,
-      l.emi_amount,
-      DATE_ADD(l.first_emi_date, INTERVAL 
-        (SELECT COUNT(*) FROM transactions t 
-         WHERE t.loan_id = l.id AND t.transaction_type = 'emi_payment' 
-         AND t.status = 'success') MONTH
-      ) as next_emi_date,
-      'pending' as status
-    FROM loans l
-    WHERE l.user_id = ? AND l.status = 'active'
-    ORDER BY next_emi_date ASC
-    LIMIT 3
-  `;
-  const upcomingPayments = await executeQuery(upcomingPaymentsQuery, [userId]);
+  // Get upcoming payments (simplified - no EMI data available)
+  const upcomingPayments = []; // No EMI tracking available
 
   // Get recent notifications
   const notificationsQuery = `
@@ -169,10 +146,10 @@ const fetchDashboardData = async (userId) => {
   `;
   const notifications = await executeQuery(notificationsQuery, [userId]);
 
-  // Calculate available credit (simplified calculation)
+  // Calculate available credit (simplified calculation without EMI data)
   const monthlyIncome = financial.monthly_income || 0;
-  const existingEMIs = (activeLoans || []).reduce((sum, loan) => sum + (loan.emi_amount || 0), 0);
-  const availableCredit = Math.max(0, (monthlyIncome * 0.4) - existingEMIs) * 12; // 40% of income rule
+  const existingLoanAmount = (activeLoans || []).reduce((sum, loan) => sum + (loan.loan_amount || 0), 0);
+  const availableCredit = Math.max(0, (monthlyIncome * 0.4) * 12 - existingLoanAmount); // 40% of income rule
 
   // Calculate payment score (simplified)
   const paymentScore = 98; // This would be calculated based on payment history

@@ -107,6 +107,7 @@ export function DynamicDashboardPage() {
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pendingApplications, setPendingApplications] = useState<any[]>([]);
 
   // Load dashboard data
   const loadDashboardData = useCallback(async () => {
@@ -129,6 +130,31 @@ export function DynamicDashboardPage() {
     }
   }, []);
 
+  // Fetch pending loan applications
+  const fetchPendingApplications = useCallback(async () => {
+    try {
+      const response = await apiService.getPendingLoanApplications();
+      
+      if (response.status === 'success' || response.success === true) {
+        setPendingApplications(response.data.applications);
+      }
+    } catch (error: any) {
+      console.error('Error fetching pending applications:', error);
+      
+      // Handle timeout errors specifically
+      if (error.message?.includes('timeout')) {
+        console.warn('API timeout - this might be a server issue. Retrying in 5 seconds...');
+        // Retry after 5 seconds
+        setTimeout(() => {
+          fetchPendingApplications();
+        }, 5000);
+      }
+      
+      // Set empty array to prevent UI issues
+      setPendingApplications([]);
+    }
+  }, [user]);
+
   useEffect(() => {
     if (!isAuthenticated) {
       navigate('/auth');
@@ -140,6 +166,13 @@ export function DynamicDashboardPage() {
       loadDashboardData();
     }
   }, [isAuthenticated]);
+
+  // Fetch pending loan applications
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      fetchPendingApplications();
+    }
+  }, [isAuthenticated, user, fetchPendingApplications]);
 
   const handleLogout = async () => {
     try {
@@ -335,6 +368,60 @@ export function DynamicDashboardPage() {
           </div>
         ))}
       </div>
+
+      {/* Pending Loan Applications - Overview */}
+      {pendingApplications.length > 0 && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6">
+          <div className="flex items-center gap-3 mb-4">
+            <Clock className="w-6 h-6 text-yellow-600" />
+            <h3 className="text-lg font-semibold text-yellow-900">Pending Loan Applications</h3>
+            <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">
+              {pendingApplications.length} pending
+            </Badge>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {pendingApplications.map((application) => (
+              <div key={application.id} className="bg-white rounded-lg p-4 border border-yellow-200 hover:shadow-md transition-shadow">
+                <div className="flex justify-between items-start mb-3">
+                  <div>
+                    <h4 className="font-semibold text-gray-900">{application.loan_purpose || 'Personal Loan'}</h4>
+                    <p className="text-sm text-gray-600">App: {application.application_number}</p>
+                  </div>
+                  <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">
+                    {application.status}
+                  </Badge>
+                </div>
+                
+                <div className="space-y-2 mb-4">
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-600">Amount</span>
+                    <span className="font-semibold">₹{Number(application.loan_amount).toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-600">Current Step</span>
+                    <span className="text-sm font-medium capitalize">{application.current_step.replace('_', ' ')}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-600">Applied</span>
+                    <span className="text-sm">{formatDate(application.created_at)}</span>
+                  </div>
+                </div>
+                
+                <div className="mt-4">
+                  <button 
+                    onClick={() => navigate(`/loan-application/steps?applicationId=${application.id}`)}
+                    className="w-full bg-yellow-600 hover:bg-yellow-700 text-white font-medium py-2 px-4 rounded-md border-0 cursor-pointer transition-colors"
+                    style={{ backgroundColor: '#D97706', color: 'white' }}
+                  >
+                    Continue Application
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Desktop Enhanced Layout */}
       <div className="hidden lg:block">
@@ -640,6 +727,7 @@ export function DynamicDashboardPage() {
           </Card>
         </div>
 
+
         {/* Active Loans */}
         <Card className="p-6">
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
@@ -844,6 +932,59 @@ export function DynamicDashboardPage() {
                   Apply New Loan
                 </Button>
               </div>
+
+              {/* Pending Loan Applications */}
+              {pendingApplications.length > 0 ? (
+                <div className="space-y-4">
+                  <h2 className="text-xl font-semibold text-gray-900">Pending Loan Applications</h2>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {pendingApplications.map((application) => (
+                      <Card key={application.id} className="p-6 hover:shadow-md transition-shadow">
+                        <div className="flex justify-between items-start mb-4">
+                          <div>
+                            <h4 className="text-lg font-semibold">{application.loan_purpose || 'Personal Loan'}</h4>
+                            <p className="text-gray-600">Application: {application.application_number}</p>
+                          </div>
+                          <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">
+                            {application.status}
+                          </Badge>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-4 mb-4">
+                          <div>
+                            <p className="text-sm text-gray-500">Loan Amount</p>
+                            <p className="text-lg font-semibold">₹{Number(application.loan_amount).toLocaleString()}</p>
+                          </div>
+                          <div>
+                            <p className="text-sm text-gray-500">Current Step</p>
+                            <p className="text-sm font-medium capitalize">{application.current_step.replace('_', ' ')}</p>
+                          </div>
+                        </div>
+                        
+                        <div className="flex justify-between items-center">
+                          <p className="text-sm text-gray-500">
+                            Applied: {formatDate(application.created_at)}
+                          </p>
+                          <Button 
+                            onClick={() => {
+                              console.log('Continue Application clicked for:', application.id);
+                              navigate(`/loan-application/steps?applicationId=${application.id}`);
+                            }}
+                            style={{ backgroundColor: '#0052FF' }}
+                            size="sm"
+                          >
+                            Continue Application
+                          </Button>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8 text-gray-500">
+                  <p>No pending loan applications</p>
+                </div>
+              )}
               
               {active_loans.length > 0 ? (
                 <div className="grid gap-6">

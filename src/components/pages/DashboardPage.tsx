@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { User as UserType } from '../../services/api';
+import { User as UserType, apiService } from '../../services/api';
 import { Card } from '../ui/card';
+import { LoanApplicationCard } from '../LoanApplicationCard';
 
 // Local interface for user profile data
 interface UserProfile {
@@ -20,7 +21,6 @@ import {
   CreditCard, 
   FileText, 
   User, 
-  Bell, 
   TrendingUp, 
   Calendar,
   IndianRupee,
@@ -34,8 +34,6 @@ import {
   Settings,
   LogOut,
   BarChart3,
-  PieChart,
-  Activity,
   Wallet,
   CreditCard as CreditCardIcon,
   Calculator,
@@ -44,7 +42,6 @@ import {
   HelpCircle,
   ChevronRight,
   ArrowUpRight,
-  ArrowDownRight,
   Target,
   Shield
 } from 'lucide-react';
@@ -58,6 +55,7 @@ export function DashboardPage() {
   const [showLoanApplication, setShowLoanApplication] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pendingApplications, setPendingApplications] = useState<any[]>([]);
 
   // Create mock user profile from AuthContext user data (no API call needed)
   const createMockUserProfile = useCallback((user: UserType) => {
@@ -92,6 +90,28 @@ export function DashboardPage() {
     };
   }, []);
 
+  const fetchPendingApplications = useCallback(async () => {
+    try {
+      console.log('Fetching pending applications...');
+      console.log('Current user:', user);
+      console.log('User ID:', user?.id);
+      const response = await apiService.getPendingLoanApplications();
+      console.log('Pending applications response:', response);
+      console.log('Response status:', response.status);
+      console.log('Response success:', response.success);
+      console.log('Response data:', response.data);
+      
+      if (response.status === 'success' || response.success === true) {
+        console.log('Setting pending applications:', response.data.applications);
+        setPendingApplications(response.data.applications);
+      } else {
+        console.log('API call failed or no data:', response.message);
+      }
+    } catch (error) {
+      console.error('Error fetching pending applications:', error);
+    }
+  }, [user]);
+
   useEffect(() => {
     if (!isAuthenticated) {
       navigate('/auth');
@@ -113,6 +133,19 @@ export function DashboardPage() {
       return;
     }
   }, [user, navigate]);
+
+  // Fetch pending loan applications
+  useEffect(() => {
+    console.log('Dashboard: useEffect for fetchPendingApplications triggered');
+    console.log('Dashboard: isAuthenticated:', isAuthenticated);
+    console.log('Dashboard: user:', user);
+    if (isAuthenticated && user) {
+      console.log('Dashboard: Calling fetchPendingApplications');
+      fetchPendingApplications();
+    } else {
+      console.log('Dashboard: Not authenticated or no user, skipping fetchPendingApplications');
+    }
+  }, [isAuthenticated, user, fetchPendingApplications]);
 
   const handleLogout = async () => {
     try {
@@ -154,7 +187,7 @@ export function DashboardPage() {
     email: user.email,
     kycStatus: userProfile.kycStatus?.overall_status || 'not_started',
     creditScore: userProfile.kycStatus?.overall_score || 0,
-    availableCredit: userProfile.user.max_loan_amount || 500000,
+    availableCredit: 500000,
     totalLoans: 2,
     activeLoans: 1
   };
@@ -310,6 +343,23 @@ export function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Pending Loan Applications */}
+      {(() => {
+        console.log('Dashboard: pendingApplications.length:', pendingApplications.length);
+        console.log('Dashboard: pendingApplications:', pendingApplications);
+        return null;
+      })()}
+      {pendingApplications.length > 0 && (
+        <div className="space-y-4">
+          <h2 className="text-xl font-semibold text-gray-900">Pending Loan Applications</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {pendingApplications.map((application) => (
+              <LoanApplicationCard key={application.id} application={application} />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Desktop Enhanced Layout */}
       <div className="hidden lg:block">

@@ -224,6 +224,123 @@ class ApiService {
     return this.request('GET', '/employment-details');
   }
 
+  async createLoanApplication(applicationData: {
+    desired_amount: number;
+    purpose: string;
+  }): Promise<ApiResponse<{
+    application_id: number;
+    application_number: string;
+    status: string;
+  }>> {
+    return this.request('POST', '/loans/apply', applicationData);
+  }
+
+  async saveBankDetails(bankData: {
+    application_id: number;
+    account_number: string;
+    ifsc_code: string;
+  }): Promise<ApiResponse<{
+    bank_details_id: number;
+    status: string;
+  }>> {
+    return this.request('POST', '/bank-details', bankData);
+  }
+
+  async getBankDetails(applicationId: string): Promise<ApiResponse<{
+    id: number;
+    bank_name: string;
+    account_number: string;
+    ifsc_code: string;
+    account_holder_name: string;
+    account_type: string;
+    is_primary: boolean;
+    is_verified: boolean;
+    created_at: string;
+  }>> {
+    return this.request('GET', `/bank-details/${applicationId}`);
+  }
+
+  async getUserBankDetails(userId: number): Promise<ApiResponse<Array<{
+    id: number;
+    bank_name: string;
+    account_number: string;
+    ifsc_code: string;
+    account_holder_name: string;
+    account_type: string;
+    is_primary: boolean;
+    is_verified: boolean;
+    created_at: string;
+    application_number?: string;
+    loan_amount?: number;
+    loan_purpose?: string;
+  }>>> {
+    return this.request('GET', `/bank-details/user/${userId}`);
+  }
+
+  async chooseBankDetails(data: {
+    application_id: number;
+    bank_details_id: number;
+  }): Promise<ApiResponse<{
+    bank_details_id: number;
+    status: string;
+  }>> {
+    return this.request('POST', '/bank-details/choose', data);
+  }
+
+  async getLoanApplication(applicationId: string): Promise<ApiResponse<{
+    id: number;
+    application_number: string;
+    loan_amount: number;
+    loan_purpose: string;
+    status: string;
+    current_step: string;
+    created_at: string;
+  }>> {
+    return this.request('GET', `/loans/${applicationId}`);
+  }
+
+  async saveReferenceDetails(referenceData: {
+    application_id: number;
+    references: Array<{
+      name: string;
+      phone: string;
+      relation: string;
+    }>;
+  }): Promise<ApiResponse<{
+    references_count: number;
+    status: string;
+  }>> {
+    return this.request('POST', '/loan-references', referenceData);
+  }
+
+  async getReferenceDetails(applicationId: string): Promise<ApiResponse<Array<{
+    id: number;
+    user_id: number;
+    loan_application_id: number;
+    name: string;
+    phone: string;
+    relation: string;
+    status: string;
+    created_at: string;
+    updated_at: string;
+  }>>> {
+    return this.request('GET', `/loan-references/${applicationId}`);
+  }
+
+  async getPendingLoanApplications(): Promise<ApiResponse<{
+    applications: Array<{
+      id: number;
+      application_number: string;
+      loan_amount: number;
+      loan_purpose: string;
+      status: string;
+      current_step: string;
+      created_at: string;
+    }>;
+  }>> {
+    return this.request('GET', '/loans/pending');
+  }
+
   async getProfileStatus(): Promise<ApiResponse<{ user: User; profile_status: any }>> {
     return this.request('GET', '/user/profile/status');
   }
@@ -325,7 +442,7 @@ class ApiService {
       processed_at: string;
     }>;
   }>> {
-    return this.request('GET', `/dashboard/loans/${loanId}`);
+    return this.request('GET', `/loans/${loanId}`);
   }
 
   // Health check

@@ -204,6 +204,26 @@ class ApiService {
     return this.request('PUT', '/user/profile/additional', profileData);
   }
 
+  async updateEmploymentDetails(employmentData: {
+    monthly_income: string;
+    employment_type: string;
+    company_name: string;
+    designation: string;
+    salary_date: string;
+  }): Promise<ApiResponse<{ user: User; next_step: string; step_completed: string }>> {
+    return this.request('POST', '/employment-details', employmentData);
+  }
+
+  async getEmploymentDetails(): Promise<ApiResponse<{
+    monthly_income: number;
+    employment_type: string;
+    company_name: string;
+    designation: string;
+    salary_date: number;
+  }>> {
+    return this.request('GET', '/employment-details');
+  }
+
   async getProfileStatus(): Promise<ApiResponse<{ user: User; profile_status: any }>> {
     return this.request('GET', '/user/profile/status');
   }

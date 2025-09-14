@@ -24,6 +24,7 @@ const calculatorRoutes = require('./routes/calculators');
 const verificationRoutes = require('./routes/verification');
 const transactionRoutes = require('./routes/transactions');
 const notificationRoutes = require('./routes/notifications');
+const employmentRoutes = require('./routes/employment');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -101,6 +102,7 @@ app.use('/api/calculators', calculatorRoutes);
 app.use('/api/verification', verificationRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/employment-details', employmentRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

@@ -197,8 +197,8 @@ const updateAdditionalProfile = async (req, res) => {
 
     // Update user profile with completion step (PAN goes to verification_records)
     const userUpdateData = {
-      profile_completion_step: 4, // Mark profile as complete
-      profile_completed: true
+      profile_completion_step: 4, // Move to employment details step
+      profile_completed: false // Not complete yet, still need employment details
     };
 
     const updatedUser = await updateProfileById(userId, userUpdateData);
@@ -242,7 +242,7 @@ const updateAdditionalProfile = async (req, res) => {
 
     res.json({
       status: 'success',
-      message: 'Profile completed successfully',
+      message: 'Additional details saved successfully',
       data: {
         user: profileSummary,
         addresses: {
@@ -252,7 +252,8 @@ const updateAdditionalProfile = async (req, res) => {
         verification: {
           pan: panVerification
         },
-        profile_completed: true,
+        profile_completed: false,
+        next_step: 'employment_details',
         step_completed: 'additional_details'
       }
     });
@@ -314,9 +315,13 @@ const getProfileStatus = async (req, res) => {
         break;
       case 3:
         stepName = 'additional_details';
-        nextStep = 'complete';
+        nextStep = 'employment_details';
         break;
       case 4:
+        stepName = 'employment_details';
+        nextStep = 'complete';
+        break;
+      case 5:
         stepName = 'complete';
         nextStep = null;
         break;
@@ -333,8 +338,8 @@ const getProfileStatus = async (req, res) => {
           current_step: currentStep,
           step_name: stepName,
           next_step: nextStep,
-          is_complete: currentStep >= 4,
-          progress_percentage: Math.min((currentStep / 4) * 100, 100)
+          is_complete: currentStep >= 5,
+          progress_percentage: Math.min((currentStep / 5) * 100, 100)
         }
       }
     });

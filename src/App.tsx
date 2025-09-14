@@ -294,7 +294,7 @@ function AppContent() {
         
         <Route path="/dashboard" element={
           isAuthenticated ? (
-            user?.profile_completion_step >= 4 ? (
+            user?.profile_completion_step >= 5 ? (
               <DashboardLayout>
                 <DashboardPage />
               </DashboardLayout>

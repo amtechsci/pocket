@@ -18,6 +18,7 @@ import { Progress } from '../ui/progress';
 import { toast } from 'sonner';
 import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
+import { Disclaimer } from '../Disclaimer';
 
 interface BasicProfileForm {
   first_name: string;
@@ -123,7 +124,24 @@ export function ProfileCompletionPage() {
   const handleAdditionalProfileSubmit = async (data: AdditionalProfileForm) => {
     setLoading(true);
     try {
-      const response = await apiService.updateAdditionalProfile(data);
+      // Map form data to API expected format
+      const apiData = {
+        current_address_line1: data.address_line1,
+        current_address_line2: data.address_line2,
+        current_city: data.city,
+        current_state: data.state,
+        current_pincode: data.pincode,
+        current_country: data.country || 'India',
+        permanent_address_line1: data.address_line1, // Using same address for both
+        permanent_address_line2: data.address_line2,
+        permanent_city: data.city,
+        permanent_state: data.state,
+        permanent_pincode: data.pincode,
+        permanent_country: data.country || 'India',
+        pan_number: data.pan_number,
+      };
+      
+      const response = await apiService.updateAdditionalProfile(apiData);
       
       if (response.status === 'success' && response.data) {
         // Update user context with new data
@@ -254,7 +272,10 @@ export function ProfileCompletionPage() {
               <form onSubmit={basicForm.handleSubmit(handleBasicProfileSubmit)} className="space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label htmlFor="first_name">First Name *</Label>
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor="first_name">First Name *</Label>
+                      <span className="text-xs text-gray-500 font-normal">Name as per PAN Card</span>
+                    </div>
                     <Input
                       id="first_name"
                       {...basicForm.register('first_name', { required: 'First name is required' })}
@@ -266,7 +287,10 @@ export function ProfileCompletionPage() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="last_name">Last Name *</Label>
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor="last_name">Last Name *</Label>
+                      <span className="text-xs text-gray-500 font-normal">Name as per PAN Card</span>
+                    </div>
                     <Input
                       id="last_name"
                       {...basicForm.register('last_name', { required: 'Last name is required' })}
@@ -349,6 +373,11 @@ export function ProfileCompletionPage() {
                     {loading ? 'Saving...' : 'Continue'}
                     <ArrowRight className="w-4 h-4 ml-2" />
                   </Button>
+                </div>
+
+                {/* Disclaimer */}
+                <div className="mt-6 pt-4 border-t border-gray-100">
+                  <Disclaimer />
                 </div>
               </form>
             )}
@@ -458,6 +487,11 @@ export function ProfileCompletionPage() {
                     {loading ? 'Completing...' : 'Complete Profile'}
                     <CheckCircle className="w-4 h-4 ml-2" />
                   </Button>
+                </div>
+
+                {/* Disclaimer */}
+                <div className="mt-6 pt-4 border-t border-gray-100">
+                  <Disclaimer />
                 </div>
               </form>
             )}

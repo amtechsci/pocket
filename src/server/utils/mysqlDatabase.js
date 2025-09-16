@@ -9,17 +9,19 @@ const dbConfig = {
   database: process.env.DB_NAME || 'pocket',
   port: process.env.DB_PORT || 3306,
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: 20, // Increased from 10
   queueLimit: 0,
-  acquireTimeout: 60000,
-  timeout: 60000,
+  acquireTimeout: 30000, // Reduced from 60000
+  timeout: 30000, // Reduced from 60000
   reconnect: true,
   // MySQL2 specific options
   charset: 'utf8mb4',
   timezone: '+00:00',
-  connectTimeout: 60000,
-  acquireTimeout: 60000,
-  timeout: 60000
+  connectTimeout: 30000, // Reduced from 60000
+  // Remove duplicate acquireTimeout and timeout
+  idleTimeout: 300000, // 5 minutes
+  maxReconnects: 3,
+  reconnectDelay: 2000
 };
 
 // Create connection pool

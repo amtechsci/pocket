@@ -96,3 +96,4 @@ app.listen(PORT, () => {
   console.log(`Test server running on port ${PORT}`);
   console.log('Visit http://localhost:3003/test-pending to test the pending applications API');
 });
+

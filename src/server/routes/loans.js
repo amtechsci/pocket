@@ -144,6 +144,8 @@ router.post('/apply', requireAuth, async (req, res) => {
 // GET /api/loans/pending - Get Pending Loan Applications for Dashboard
 router.get('/pending', requireAuth, async (req, res) => {
   let connection;
+  const startTime = Date.now();
+  
   try {
     console.log('Pending applications API: Starting...');
     const userId = req.session.userId;
@@ -157,9 +159,9 @@ router.get('/pending', requireAuth, async (req, res) => {
       });
     }
 
-    // Set a timeout for the entire operation
+    // Set a longer timeout for the entire operation
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Database query timeout')), 15000);
+      setTimeout(() => reject(new Error('Database query timeout')), 30000);
     });
 
     const queryPromise = (async () => {
@@ -191,43 +193,29 @@ router.get('/pending', requireAuth, async (req, res) => {
         });
       }
 
-      // If no active loans, check for pending loan applications
-      // Very simple query to avoid timeout issues
+      // If no active loans, check for pending loan applications with optimized query
       console.log('Querying pending loan applications...');
       const [applications] = await connection.execute(
-        `SELECT id, application_number, loan_amount, loan_purpose, status, created_at
-         FROM loan_applications 
-         WHERE user_id = ? AND status IN ('submitted', 'under_review', 'approved', 'disbursed')
-         ORDER BY created_at DESC
+        `SELECT 
+           la.id, 
+           la.application_number, 
+           la.loan_amount, 
+           la.loan_purpose, 
+           la.status, 
+           la.created_at,
+           CASE 
+             WHEN bd.id IS NOT NULL AND ref.id IS NOT NULL THEN 'completed'
+             WHEN bd.id IS NOT NULL THEN 'references'
+             ELSE 'bank_details'
+           END as current_step
+         FROM loan_applications la
+         LEFT JOIN bank_details bd ON la.id = bd.loan_application_id
+         LEFT JOIN references ref ON la.id = ref.loan_application_id
+         WHERE la.user_id = ? AND la.status IN ('submitted', 'under_review', 'approved', 'disbursed')
+         ORDER BY la.created_at DESC
          LIMIT 10`,
         [userId]
       );
-
-      // Get current step for each application separately to avoid complex joins
-      for (let app of applications) {
-        try {
-          const [bankDetails] = await connection.execute(
-            'SELECT id FROM bank_details WHERE loan_application_id = ? LIMIT 1',
-            [app.id]
-          );
-          
-          const [references] = await connection.execute(
-            'SELECT id FROM references WHERE loan_application_id = ? LIMIT 1',
-            [app.id]
-          );
-          
-          if (bankDetails.length > 0 && references.length > 0) {
-            app.current_step = 'completed';
-          } else if (bankDetails.length > 0) {
-            app.current_step = 'references';
-          } else {
-            app.current_step = 'bank_details';
-          }
-        } catch (stepError) {
-          console.warn(`Error getting step for application ${app.id}:`, stepError.message);
-          app.current_step = 'bank_details';
-        }
-      }
 
       console.log(`Found ${applications.length} pending applications`);
 
@@ -252,6 +240,10 @@ router.get('/pending', requireAuth, async (req, res) => {
 
     // Race between query and timeout
     await Promise.race([queryPromise, timeoutPromise]);
+    
+    // Log performance metrics
+    const duration = Date.now() - startTime;
+    console.log(`Pending applications API completed in ${duration}ms`);
 
   } catch (error) {
     console.error('Get pending loan applications error:', error);
@@ -261,6 +253,11 @@ router.get('/pending', requireAuth, async (req, res) => {
         success: false,
         message: 'Request timeout - please try again'
       });
+    } else if (error.code === 'ECONNRESET' || error.code === 'PROTOCOL_CONNECTION_LOST') {
+      res.status(503).json({
+        success: false,
+        message: 'Database connection lost - please try again'
+      });
     } else {
       res.status(500).json({
         success: false,
@@ -269,7 +266,11 @@ router.get('/pending', requireAuth, async (req, res) => {
     }
   } finally {
     if (connection) {
-      connection.release();
+      try {
+        connection.release();
+      } catch (releaseError) {
+        console.warn('Error releasing database connection:', releaseError.message);
+      }
     }
   }
 });

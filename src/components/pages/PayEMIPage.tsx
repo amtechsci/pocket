@@ -10,7 +10,7 @@ import { Input } from '../ui/input';
 import { Separator } from '../ui/separator';
 import { DashboardHeader } from '../DashboardHeader';
 import { DashboardSidebar } from '../DashboardSidebar';
-import { toast } from 'sonner@2.0.3';
+import { toast } from 'sonner';
 
 export function PayEMIPage() {
   const navigate = useNavigate();
